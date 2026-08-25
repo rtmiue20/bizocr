@@ -8,3 +8,5 @@
 # Datasource local storage ignored files
 /dataSources/
 /dataSources.local.xml
+# Ignore Secret Configs
+src/main/resources/application-secret.yml

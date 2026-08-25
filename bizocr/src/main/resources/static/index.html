@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BizOCR - Hệ thống Xử lý Chứng từ Thông minh</title>
+    <!-- Tailwind CSS qua CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-100 font-sans h-screen flex flex-col">
+
+<!-- Header -->
+<header class="bg-indigo-700 text-white shadow-md px-6 py-4 flex justify-between items-center">
+    <div class="flex items-center space-x-3">
+        <i class="fa-solid fa-[#00d2ff] fa-file-invoice text-2xl"></i>
+        <h1 class="text-xl font-bold tracking-wide">BizOCR Platform</h1>
+    </div>
+    <div class="text-sm bg-indigo-800 px-3 py-1 rounded-full text-indigo-200">
+        Spring WebFlux + RapidOCR Engine
+    </div>
+</header>
+
+<!-- Main Split-View Layout -->
+<div class="flex-1 flex overflow-hidden p-4 gap-4">
+
+    <!-- CỘT BÊN TRÁI: Danh sách & Xem Ảnh Chứng từ -->
+    <div class="w-1/2 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <!-- Upload Toolbar -->
+        <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+            <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
+                <i class="fa-solid fa-cloud-arrow-up"></i> Tải ảnh chứng từ mới
+                <input type="file" id="fileInput" class="hidden" accept="image/*" onchange="uploadFile()">
+            </label>
+            <button onclick="loadDocuments()" class="text-gray-600 hover:text-indigo-600 p-2 text-sm font-medium">
+                <i class="fa-solid fa-rotate-right"></i> Làm mới
+            </button>
+        </div>
+
+        <!-- Previews / Image View Header -->
+        <div class="p-3 bg-gray-100 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase flex justify-between">
+            <span>Xem Trước Ảnh Chứng Từ</span>
+            <span id="currentFileName" class="text-indigo-600">Chưa chọn chứng từ nào</span>
+        </div>
+
+        <!-- Frame Hiển thị Ảnh Xem Trực tiếp -->
+        <div class="flex-1 bg-gray-900 flex items-center justify-center p-2 relative overflow-auto min-h-[300px]">
+            <img id="documentImageViewer" src="" alt="Vui lòng chọn chứng từ" class="max-h-full max-w-full object-contain hidden border border-gray-700 rounded shadow-lg">
+            <div id="imagePlaceholder" class="text-gray-500 flex flex-col items-center">
+                <i class="fa-regular fa-image text-5xl mb-2"></i>
+                <p class="text-sm">Chọn một chứng từ từ danh sách để xem ảnh</p>
+            </div>
+        </div>
+
+        <!-- Danh sách Chứng từ Gần đây -->
+        <div class="h-48 border-t border-gray-200 overflow-y-auto">
+            <table class="w-full text-sm text-left text-gray-600">
+                <thead class="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0">
+                <tr>
+                    <th class="px-4 py-2">ID</th>
+                    <th class="px-4 py-2">Tên Tệp</th>
+                    <th class="px-4 py-2">Loại</th>
+                    <th class="px-4 py-2">Trạng thái</th>
+                    <th class="px-4 py-2 text-right">Hành động</th>
+                </tr>
+                </thead>
+                <tbody id="documentTableBody">
+                <!-- Render danh sách qua Javascript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- CỘT BÊN PHẢI: Form Dữ Liệu Bóc Tách (JSON Editor / Dynamic Fields) -->
+    <div class="w-1/2 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+            <h2 class="font-bold text-gray-800 flex items-center gap-2">
+                <i class="fa-solid fa-code text-indigo-600"></i> Thông Tin Bóc Tách Chi Tiết
+            </h2>
+            <div id="docStatusBadge">
+                <span class="bg-gray-200 text-gray-700 text-xs font-medium px-2.5 py-0.5 rounded">Sẵn sàng</span>
+            </div>
+        </div>
+
+        <div class="flex-1 p-4 overflow-y-auto space-y-4">
+            <!-- Metadata General -->
+            <div class="grid grid-cols-2 gap-4 bg-gray-50 p-3 rounded-lg border border-gray-100 text-sm">
+                <div>
+                    <span class="text-gray-500 block text-xs">Loại chứng từ:</span>
+                    <strong id="metaDocType" class="text-gray-800">-</strong>
+                </div>
+                <div>
+                    <span class="text-gray-500 block text-xs">Độ tin cậy (Confidence):</span>
+                    <strong id="metaConfidence" class="text-indigo-600">-</strong>
+                </div>
+            </div>
+
+            <!-- Form Dynamic Extracted Fields -->
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Các trường thông tin đã trích xuất (JSON):</label>
+                <textarea id="jsonEditor" class="w-full h-64 p-3 bg-gray-900 text-green-400 font-mono text-xs rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Kết quả JSON sẽ hiển thị ở đây..."></textarea>
+            </div>
+
+            <!-- Chức năng chỉnh sửa & Lưu -->
+            <div class="flex justify-end gap-2 pt-2">
+                <button onclick="formatJson()" class="px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-xs font-semibold transition">
+                    <i class="fa-solid fa-align-left"></i> Format JSON
+                </button>
+                <button onclick="submitReview('REJECTED')" class="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1">
+                    <i class="fa-solid fa-xmark"></i> Từ chối
+                </button>
+                <button onclick="submitReview('APPROVED')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1">
+                    <i class="fa-solid fa-check"></i> Phê duyệt
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Javascript Logic -->
+<script>
+    const API_BASE = '/api/v1/documents';
+    let currentDocId = null;
+
+    // 1. Khởi chạy khi load trang
+    document.addEventListener('DOMContentLoaded', () => {
+        loadDocuments();
+    });
+
+    // 2. Lấy danh sách chứng từ từ API Backend
+    async function loadDocuments() {
+        try {
+            const response = await fetch(`${API_BASE}?page=0&size=10`);
+            const data = await response.json();
+
+            const tbody = document.getElementById('documentTableBody');
+            tbody.innerHTML = '';
+
+            if (data.items && data.items.length > 0) {
+                data.items.forEach(doc => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'border-b hover:bg-indigo-50/50 cursor-pointer transition';
+                    tr.onclick = () => selectDocument(doc.id, doc.fileName);
+
+                    tr.innerHTML = `
+                            <td class="px-4 py-3 font-semibold text-gray-900">#${doc.id}</td>
+                            <td class="px-4 py-3 font-medium text-gray-800 truncate max-w-[150px]">${doc.fileName}</td>
+                            <td class="px-4 py-3"><span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">${doc.documentType || 'N/A'}</span></td>
+                            <td class="px-4 py-3">${getStatusBadge(doc.status)}</td>
+                            <td class="px-4 py-3 text-right">
+                                <button class="text-indigo-600 hover:underline text-xs font-semibold">Xem</button>
+                            </td>
+                        `;
+                    tbody.appendChild(tr);
+                });
+
+                // Tự động xem phần tử đầu tiên nếu chưa chọn
+                if (!currentDocId && data.items.length > 0) {
+                    selectDocument(data.items[0].id, data.items[0].fileName);
+                }
+            } else {
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-400">Chưa có chứng từ nào</td></tr>`;
+            }
+        } catch (err) {
+            console.error('Lỗi khi tải danh sách:', err);
+        }
+    }
+
+    // 3. Chọn và hiển thị thông tin chứng từ chi tiết + xem ảnh
+    async function selectDocument(id, fileName) {
+        currentDocId = id;
+        document.getElementById('currentFileName').innerText = fileName;
+
+        // Load ảnh chứng từ qua API /file
+        const imgViewer = document.getElementById('documentImageViewer');
+        const placeholder = document.getElementById('imagePlaceholder');
+
+        imgViewer.src = `${API_BASE}/${id}/file`;
+        imgViewer.classList.remove('hidden');
+        placeholder.classList.add('hidden');
+
+        // Fetch chi tiết JSON
+        try {
+            const res = await fetch(`${API_BASE}/${id}`);
+            const doc = await res.json();
+
+            document.getElementById('metaDocType').innerText = doc.documentType || 'Đang phân loại...';
+            document.getElementById('metaConfidence').innerText = doc.confidenceScore ? (doc.confidenceScore * 100).toFixed(1) + '%' : 'N/A';
+            document.getElementById('docStatusBadge').innerHTML = getStatusBadge(doc.status);
+
+            // Parse và hiển thị JSON bóc tách
+            let parsedFields = {};
+            if (doc.extractedFields) {
+                try {
+                    parsedFields = JSON.parse(doc.extractedFields);
+                } catch (e) {
+                    parsedFields = { raw: doc.extractedFields };
+                }
+            }
+            document.getElementById('jsonEditor').value = JSON.stringify(parsedFields, null, 2);
+
+        } catch (err) {
+            console.error('Lỗi tải chi tiết:', err);
+        }
+    }
+
+    // 4. Upload file mới qua API
+    async function uploadFile() {
+        const fileInput = document.getElementById('fileInput');
+        if (!fileInput.files || fileInput.files.length === 0) return;
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        try {
+            const res = await fetch(`${API_BASE}/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            const result = await res.json();
+
+            alert(`Tải file lên thành công! Document ID: ${result.documentId}`);
+            fileInput.value = ''; // Reset input
+
+            // Refresh lại danh sách sau 1.5 giây để chờ xử lý ngầm
+            setTimeout(loadDocuments, 1500);
+        } catch (err) {
+            alert('Tải file thất bại!');
+            console.error(err);
+        }
+    }
+
+    // Helpers
+    function getStatusBadge(status) {
+        if (status === 'COMPLETED') {
+            return `<span class="bg-emerald-100 text-emerald-800 text-xs font-semibold px-2 py-0.5 rounded">Hoàn thành</span>`;
+        } else if (status === 'PENDING') {
+            return `<span class="bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 rounded">Đang xử lý</span>`;
+        }
+        return `<span class="bg-red-100 text-red-800 text-xs font-semibold px-2 py-0.5 rounded">${status}</span>`;
+    }
+
+    function formatJson() {
+        const editor = document.getElementById('jsonEditor');
+        try {
+            const json = JSON.parse(editor.value);
+            editor.value = JSON.stringify(json, null, 2);
+        } catch (e) {
+            alert('Cú pháp JSON không hợp lệ!');
+        }
+    }
+
+    function saveChanges() {
+        alert('Thông tin đã được cập nhật thành công!');
+    }
+
+    async function submitReview(status) {
+        if (!currentDocId) {
+            alert('Vui lòng chọn chứng từ cần duyệt!');
+            return;
+        }
+
+        const jsonContent = document.getElementById('jsonEditor').value;
+        try {
+            JSON.parse(jsonContent); // Validate JSON format
+        } catch (e) {
+            alert('Cú pháp JSON chưa đúng, vui lòng kiểm tra lại!');
+            return;
+        }
+
+        const payload = {
+            status: status,
+            extractedFields: jsonContent,
+            reviewer: "KeToanTruong_MinhTrieu"
+        };
+
+        try {
+            const res = await fetch(`${API_BASE}/${currentDocId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+                alert(`Đã cập nhật trạng thái chứng từ thành: ${status}`);
+                loadDocuments(); // Refresh lại bảng danh sách
+            } else {
+                alert('Có lỗi xảy ra khi lưu trạng thái!');
+            }
+        } catch (err) {
+            console.error('Lỗi khi cập nhật:', err);
+            alert('Kết nối máy chủ thất bại!');
+        }
+    }
+</script>
+</body>
+</html>
