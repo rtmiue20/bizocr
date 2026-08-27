@@ -1,6 +1,6 @@
 package com.company.bizocr.model.dto.response;
 
-import com.company.bizocr.model.entity.DocumentRecord;
+import com.company.bizocr.model.entity.Document;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -13,7 +13,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DocumentPageResponse {
-    private List<DocumentRecord> items;
+    private List<Document> items;
     private long totalElements;
     private int page;
     private int size;

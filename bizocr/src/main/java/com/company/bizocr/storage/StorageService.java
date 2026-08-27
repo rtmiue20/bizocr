@@ -16,7 +16,7 @@ import java.util.UUID;
 @Service
 public class StorageService {
 
-    private final Path rootLocation = Paths.get("uploads");
+    private final Path rootLocation = Paths.get("uploads").toAbsolutePath().normalize();
 
     public StorageService() {
         try {
@@ -52,9 +52,14 @@ public class StorageService {
         return Mono.fromCallable(() -> {
             try {
                 Path filePath = this.rootLocation.resolve(relativePath).normalize();
+                if (!filePath.startsWith(this.rootLocation)) {
+                    throw new SecurityException(
+                            "Đường dẫn file không hợp lệ: " + relativePath
+                    );
+                }
                 Resource resource = new UrlResource(filePath.toUri());
 
-                if (resource.exists() || resource.isReadable()) {
+                if (resource.exists() && resource.isReadable()) {
                     return resource;
                 } else {
                     throw new RuntimeException("Không tìm thấy file hoặc không thể đọc: " + relativePath);

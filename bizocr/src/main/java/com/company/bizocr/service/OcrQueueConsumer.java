@@ -1,6 +1,6 @@
 package com.company.bizocr.service;
 
-import com.company.bizocr.model.entity.DocumentRecord;
+import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.pipeline.PipelineOrchestrator;
 import com.company.bizocr.repository.DocumentRepository;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +12,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import reactor.core.publisher.Flux;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import java.io.FileNotFoundException;
 import java.nio.file.Files;
@@ -31,47 +33,52 @@ public class OcrQueueConsumer {
 
     // Đường dẫn tuyệt đối tới thư mục gốc "uploads"
     private final Path rootLocation = Paths.get("uploads").toAbsolutePath().normalize();
+    private final AtomicBoolean batchRunning = new AtomicBoolean(false);
 
-    @Scheduled(fixedDelay = 2000)
+    @Scheduled(fixedDelayString = "${ocr.queue.poll-delay-ms:2000}")
     public void processQueue() {
-        log.info("OCR CONSUMER TICK chạy mỗi 2s");
-
-        redisTemplate.opsForList()
-                .rightPop(QUEUE_NAME)
+        if (!batchRunning.compareAndSet(false, true)) {
+            log.debug("Batch OCR trước vẫn đang chạy");
+            return;
+        }
+        log.info("OCR CONSUMER TICK");
+        Flux.range(0, 10)
+                .flatMap(i ->
+                                redisTemplate.opsForList()
+                                        .rightPop(QUEUE_NAME),
+                        10
+                )
                 .doOnNext(docId ->
-                        log.info("REDIS POP thành công, documentId={}", docId))
-                .switchIfEmpty(Mono.defer(() -> {
-                    log.debug("REDIS QUEUE RỖNG: {}", QUEUE_NAME);
-                    return Mono.empty();
-                }))
-                .flatMap(docIdStr -> {
-                    Long docId = Long.valueOf(docIdStr);
-
-                    return documentRepository.findById(docId)
-                            .doOnNext(record ->
-                                    log.info("Đã tìm thấy document id={}, path={}",
-                                            record.getId(),
-                                            record.getFilePath()))
-                            .switchIfEmpty(Mono.error(
-                                    new IllegalStateException(
-                                            "Không tìm thấy document id=" + docId)))
-                            .flatMap(record ->
-                                    loadFileAsByteArrayResource(record.getFilePath())
-                                            .flatMap(resource ->
-                                                    pipelineOrchestrator
-                                                            .processDocument(resource, record)
-                                            )
-                            );
-                })
-                .doOnError(error ->
-                        log.error("Lỗi toàn bộ OCR consumer", error))
+                        log.info(
+                                "REDIS POP thành công, documentId={}",
+                                docId
+                        ))
+                .flatMap(
+                        docId -> processJob(docId)
+                                .doOnError(error ->
+                                        log.error(
+                                                "Job {} thất bại",
+                                                docId,
+                                                error
+                                        ))
+                                .onErrorResume(error -> Mono.empty()),
+                        5
+                )
+                .doFinally(signal ->
+                        batchRunning.set(false))
                 .subscribe(
-                        result -> log.info("OCR job hoàn tất"),
-                        error -> log.error("Subscription OCR consumer thất bại", error)
+                        result -> log.info(
+                                "OCR job hoàn tất, documentId={}",
+                                result.getId()
+                        ),
+                        error -> log.error(
+                                "OCR batch thất bại",
+                                error
+                        )
                 );
     }
 
-    private Mono<DocumentRecord> processJob(String docIdStr) {
+    private Mono<Document> processJob(String docIdStr) {
         return Mono.fromCallable(() -> Long.valueOf(docIdStr))
                 .flatMap(documentRepository::findById)
                 .switchIfEmpty(Mono.error(

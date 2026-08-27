@@ -1,6 +1,6 @@
 package com.company.bizocr.service;
 
-import com.company.bizocr.model.entity.DocumentRecord;
+import com.company.bizocr.model.entity.Document;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -20,7 +20,7 @@ public class ExcelExportService {
 
     private final ObjectMapper objectMapper;
 
-    public Mono<byte[]> exportToExcel(List<DocumentRecord> documents) {
+    public Mono<byte[]> exportToExcel(List<Document> documents) {
         return Mono.fromCallable(() -> {
             try (SXSSFWorkbook workbook = new SXSSFWorkbook(100)) { // Tối ưu bộ nhớ với SXSSF
                 SXSSFSheet sheet = workbook.createSheet("Du Lieu Ke Toan");
@@ -35,7 +35,7 @@ public class ExcelExportService {
 
                 // Ghi dữ liệu
                 int rowIndex = 1;
-                for (DocumentRecord doc : documents) {
+                for (Document doc : documents) {
                     SXSSFRow row = sheet.createRow(rowIndex++);
                     row.createCell(0).setCellValue(doc.getId());
                     row.createCell(1).setCellValue(doc.getFileName());

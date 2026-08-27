@@ -1,13 +1,12 @@
 package com.company.bizocr.extract;
 
+import com.company.bizocr.model.dto.ClassifyResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -16,40 +15,65 @@ import java.util.regex.Pattern;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class FieldExtractorService {
 
     private final ObjectMapper objectMapper;
-    private final ChatModel chatModel; // Spring AI Auto-configured
+    private final ChatClient chatClient;
 
-    public Mono<String> extractFields(String documentType, String rawText) {
+    public FieldExtractorService(ObjectMapper objectMapper, ChatClient.Builder chatClientBuilder) {
+        this.objectMapper = objectMapper;
+        this.chatClient = chatClientBuilder.build();
+    }
+
+    public Mono<String> extractFields(
+            ClassifyResult classifyResult,
+            String rawText
+    ) {
         return Mono.fromCallable(() -> {
             if (rawText == null || rawText.isBlank()) {
                 return "{}";
             }
-
+            String documentType = classifyResult.getDocumentType();
             Map<String, Object> regexFields = new HashMap<>();
-
-            // Step 1: Thử trích xuất bằng Regex trước
-            if ("HOA_DON_VAT".equalsIgnoreCase(documentType)) {
+            
+            // Bước 1: Thử trích xuất bằng Regex
+            if ("VAT_INVOICE".equalsIgnoreCase(documentType) || "HOA_DON_VAT".equalsIgnoreCase(documentType)) {
                 regexFields = extractInvoiceVatFields(rawText);
             }
-
-            // Step 2: Đánh giá xem Regex có bóc tách đủ thông tin quan trọng không
-            boolean isRegexSuccess = regexFields.containsKey("seller_tax_code") && regexFields.containsKey("total_amount");
-
-            if (isRegexSuccess) {
-                log.info(">> [Regex Engine] Bóc tách dữ liệu thành công 100%");
+            
+            boolean regexSuccess =
+                    regexFields.containsKey("seller_tax_code")
+                            && regexFields.containsKey("total_amount");
+            if (regexSuccess) {
+                log.info("Bóc tách bằng Regex thành công");
                 return objectMapper.writeValueAsString(regexFields);
             }
 
-            // Step 3: LLM Fallback - Nếu Regex thiếu thông tin hoặc là văn bản tự do, gọi OpenAI GPT-4o-mini
-            log.warn(">> [Regex Engine] Không đủ thông tin cơ bản. Đang chuyển sang [LLM Fallback Engine]...");
-            return callLlmFallback(documentType, rawText);
-        });
+            // Bước 2: Kiểm tra outlier hoặc yêu cầu AI Fallback
+            boolean isOutlier = classifyResult.isOutlier() 
+                    || classifyResult.isUseAiFallback()
+                    || "AI_FALLBACK".equalsIgnoreCase(classifyResult.getMatchedBy())
+                    || "OLLAMA_LOCAL".equalsIgnoreCase(classifyResult.getMatchedBy())
+                    || classifyResult.getConfidenceScore() == null
+                    || classifyResult.getConfidenceScore() < 0.75;
+
+            if (!isOutlier) {
+                log.warn(
+                        "Mẫu không đủ field nhưng không phải outlier. "
+                                + "Chuyển sang kiểm duyệt thủ công"
+                );
+                return objectMapper.writeValueAsString(regexFields); // Trả về kết quả regex hiện có thay vì {}
+            }
+
+            log.warn("Chứng từ ngoại lệ. Gọi Ollama local để bóc tách");
+            return callOllamaExtraction(
+                    documentType,
+                    rawText
+            );
+        }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    private String callLlmFallback(String documentType, String rawText) {
+    private String callOllamaExtraction(String documentType, String rawText) {
         try {
             String promptText = """
                 Bạn là chuyên gia trích xuất dữ liệu chứng từ kế toán Việt Nam.
@@ -67,21 +91,21 @@ public class FieldExtractorService {
                 3. Với Hợp đồng/Chứng từ khác, trích xuất các key: party_a, party_b, contract_value, effective_date, summary.
                 """.formatted(documentType, rawText);
 
-            OpenAiChatOptions options = OpenAiChatOptions.builder()
-                    .model("gpt-4o-mini")
-                    .temperature(0.1)
-                    .build();
-            String response = chatModel.call(new Prompt(promptText)).getResult().getOutput().getText();
+
+            String response = chatClient.prompt()
+                    .user(promptText)
+                    .call()
+                    .content();
 
             // Làm sạch chuỗi JSON phản hồi từ LLM
             String cleanJson = response.replaceAll("```json", "").replaceAll("```", "").trim();
-            log.info(">> [LLM Fallback Engine] Bóc tách JSON thành công!");
+            log.info(">> [Ollama Engine] Bóc tách JSON thành công!");
             return cleanJson;
 
         } catch (Exception e) {
-            log.error(">> [LLM Fallback Engine] Lỗi khi gọi OpenAI API: {}", e.getMessage());
+            log.error(">> [Ollama Engine] Lỗi khi gọi Ollama API: {}", e.getMessage());
             Map<String, String> fallbackError = new HashMap<>();
-            fallbackError.put("error", "LLM Processing failed: " + e.getMessage());
+            fallbackError.put("error", "Ollama Processing failed: " + e.getMessage());
             try {
                 return objectMapper.writeValueAsString(fallbackError);
             } catch (Exception ex) {

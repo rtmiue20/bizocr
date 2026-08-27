@@ -1,10 +1,12 @@
 package com.company.bizocr.pipeline;
 
 import com.company.bizocr.classify.ClassifierService;
+import com.company.bizocr.company.CompanyResolverService;
 import com.company.bizocr.extract.FieldExtractorService;
-import com.company.bizocr.model.entity.DocumentRecord;
+import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.ocr.OcrClientService;
 import com.company.bizocr.repository.DocumentRepository;
+import org.springframework.core.io.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.codec.multipart.FilePart;
@@ -20,94 +22,173 @@ public class PipelineOrchestrator {
     private final ClassifierService classifierService;
     private final FieldExtractorService fieldExtractorService;
     private final DocumentRepository documentRepository;
+    private final CompanyResolverService companyResolverService;
 
     /**
-     * Luồng xử lý chính: Chạy trực tiếp từ FilePart (nếu cần)
+     * Luồng xử lý chính 1: Chạy trực tiếp từ FilePart
      */
-    public Mono<DocumentRecord> processDocument(FilePart filePart, DocumentRecord initialRecord) {
+    public Mono<Document> processDocument(FilePart filePart, Document initialRecord) {
         log.info("Bắt đầu pipeline xử lý cho file: {}", filePart.filename());
+        initialRecord.setStatus("PROCESSING");
 
-        return ocrClientService.extractText(filePart)
+        return documentRepository.save(initialRecord)
+                .flatMap(savedRecord -> ocrClientService.extractText(filePart))
                 .flatMap(ocrResult -> {
                     String rawText = ocrResult.getRawText();
+                    initialRecord.setRawOcrText(rawText);
 
                     if (rawText == null || rawText.isBlank()) {
                         return markAsFailed(initialRecord);
                     }
 
-                    // Bước 2: Gọi AI/Template Phân loại chứng từ
-                    return classifierService.classifyDocument(rawText)
-                            .flatMap(classifyResult -> {
-                                // Cập nhật thông tin phân loại vào bản ghi
-                                initialRecord.setDocumentType(classifyResult.getDocumentType());
-                                initialRecord.setConfidenceScore(classifyResult.getConfidenceScore());
+                    // Bước 1: Đối chiếu công ty
+                    return companyResolverService.resolve(rawText)
+                            .flatMap(companyInfo -> {
+                                if (companyInfo.isFound()) {
+                                    log.info("Đã match công ty: {} với score {}",
+                                            companyInfo.getCompanyName(),
+                                            companyInfo.getMatchScore());
+                                    // Bỏ comment dòng dưới nếu DocumentRecord đã có thuộc tính companyId
+                                    // initialRecord.setCompanyId(companyInfo.getCompanyId());
+                                }
 
-                                // Bước 3: Gọi AI bóc tách thông tin động thành JSON
-                                return fieldExtractorService.extractFields(classifyResult.getDocumentType(), rawText)
-                                        .flatMap(extractedJson -> {
+                                // Bước 2: Phân loại chứng từ
+                                return classifierService.classifyDocument(rawText)
+                                        .flatMap(classifyResult -> {
+                                            initialRecord.setDocumentType(classifyResult.getDocumentType());
+                                            initialRecord.setConfidenceScore(classifyResult.getConfidenceScore());
+                                            initialRecord.setMatchedBy(classifyResult.getMatchedBy());
 
-                                            // Bước 4: Lưu toàn bộ kết quả xuống Database
-                                            initialRecord.setExtractedFields(extractedJson);
-                                            initialRecord.setStatus("COMPLETED");
+                                            boolean usedAiFallback = "AI_FALLBACK".equalsIgnoreCase(classifyResult.getMatchedBy())
+                                                    || "OLLAMA_LOCAL".equalsIgnoreCase(classifyResult.getMatchedBy());
+                                            initialRecord.setUsedAiFallback(usedAiFallback);
+                                            initialRecord.setModelVersion("template-v1");
 
-                                            log.info("Xử lý thành công file {}. Loại: {}", filePart.filename(), classifyResult.getDocumentType());
-                                            return documentRepository.save(initialRecord);
+                                            // Bước 3: Bóc tách dữ liệu
+                                            return fieldExtractorService.extractFields(classifyResult, rawText)
+                                                    .map(extractedFields -> {
+                                                        initialRecord.setExtractedFields(extractedFields);
+
+                                                        boolean lowConfidence = classifyResult.getConfidenceScore() == null
+                                                                || classifyResult.getConfidenceScore() < 0.90;
+
+                                                        boolean fieldsIncomplete = extractedFields == null
+                                                                || extractedFields.isBlank()
+                                                                || "{}".equals(extractedFields);
+
+                                                        // Nếu AI nhận diện yếu, thiếu field, HOẶC không tìm thấy công ty -> Needs Review
+                                                        if (usedAiFallback || lowConfidence || fieldsIncomplete || !companyInfo.isFound()) {
+                                                            initialRecord.setStatus("NEEDS_REVIEW");
+                                                        } else {
+                                                            initialRecord.setStatus("COMPLETED");
+                                                        }
+
+                                                        log.info("Document {}: type={}, matchedBy={}, status={}",
+                                                                initialRecord.getId(),
+                                                                classifyResult.getDocumentType(),
+                                                                classifyResult.getMatchedBy(),
+                                                                initialRecord.getStatus());
+
+                                                        return initialRecord;
+                                                    });
                                         });
                             });
                 })
+                .flatMap(documentRepository::save)
                 .onErrorResume(error -> {
-                    log.error("Pipeline thất bại cho file {}: {}", filePart.filename(), error.getMessage());
-                    return markAsFailed(initialRecord);
+                    log.error("Pipeline thất bại cho document ID {}", initialRecord.getId(), error);
+                    initialRecord.setStatus("FAILED");
+                    return documentRepository.save(initialRecord)
+                            .onErrorResume(saveError -> {
+                                log.error("Không thể cập nhật trạng thái FAILED cho document ID {}", initialRecord.getId(), saveError);
+                                return Mono.just(initialRecord);
+                            });
                 });
     }
 
-    // Hàm tiện ích: Đánh dấu file lỗi nếu có sự cố
-    private Mono<DocumentRecord> markAsFailed(DocumentRecord record) {
-        record.setStatus("FAILED");
-        return documentRepository.save(record);
-    }
-
-    public Mono<DocumentRecord> processDocument(org.springframework.core.io.Resource resource, DocumentRecord record) {
+    /**
+     * Luồng xử lý chính 2: Chạy từ Resource (Dùng trong Queue/Consumer)
+     */
+    public Mono<Document> processDocument(Resource resource, Document record) {
         record.setStatus("PROCESSING");
 
         return documentRepository.save(record)
                 .flatMap(savedRecord -> ocrClientService.scanDocument(resource))
                 .flatMap(ocrResult -> {
-                    if (ocrResult.getRawText() == null || ocrResult.getRawText().isBlank()) {
+                    String rawText = ocrResult.getRawText();
+                    record.setRawOcrText(rawText);
+
+                    if (rawText == null || rawText.isBlank()) {
                         return markAsFailed(record);
                     }
-                    // Xử lý phân loại và bóc tách dữ liệu
-                    return classifierService.classifyDocument(ocrResult.getRawText())
-                            .flatMap(classifyResult ->
-                                    fieldExtractorService.extractFields(classifyResult.getDocumentType(), ocrResult.getRawText())
-                                            .map(extractedFields -> {
-                                                record.setDocumentType(classifyResult.getDocumentType());
-                                                record.setConfidenceScore(classifyResult.getConfidenceScore());
-                                                record.setExtractedFields(extractedFields);
-                                                record.setStatus("COMPLETED");
-                                                return record;
-                                            })
-                            );
+
+                    // Bước 1: Đối chiếu công ty
+                    return companyResolverService.resolve(rawText)
+                            .flatMap(companyInfo -> {
+                                if (companyInfo.isFound()) {
+                                    log.info("Đã match công ty: {} với score {}",
+                                            companyInfo.getCompanyName(),
+                                            companyInfo.getMatchScore());
+                                    // record.setCompanyId(companyInfo.getCompanyId());
+                                }
+
+                                // Bước 2: Phân loại chứng từ
+                                return classifierService.classifyDocument(rawText)
+                                        .flatMap(classifyResult -> {
+                                            record.setDocumentType(classifyResult.getDocumentType());
+                                            record.setConfidenceScore(classifyResult.getConfidenceScore());
+                                            record.setMatchedBy(classifyResult.getMatchedBy());
+
+                                            boolean usedAiFallback = "AI_FALLBACK".equalsIgnoreCase(classifyResult.getMatchedBy())
+                                                    || "OLLAMA_LOCAL".equalsIgnoreCase(classifyResult.getMatchedBy());
+                                            record.setUsedAiFallback(usedAiFallback);
+                                            record.setModelVersion("template-v1");
+
+                                            // Bước 3: Bóc tách dữ liệu
+                                            return fieldExtractorService.extractFields(classifyResult, rawText)
+                                                    .map(extractedFields -> {
+                                                        record.setExtractedFields(extractedFields);
+
+                                                        boolean lowConfidence = classifyResult.getConfidenceScore() == null
+                                                                || classifyResult.getConfidenceScore() < 0.90;
+
+                                                        boolean fieldsIncomplete = extractedFields == null
+                                                                || extractedFields.isBlank()
+                                                                || "{}".equals(extractedFields);
+
+                                                        if (usedAiFallback || lowConfidence || fieldsIncomplete || !companyInfo.isFound()) {
+                                                            record.setStatus("NEEDS_REVIEW");
+                                                        } else {
+                                                            record.setStatus("COMPLETED");
+                                                        }
+
+                                                        log.info("Document {}: type={}, matchedBy={}, confidence={}, status={}",
+                                                                record.getId(),
+                                                                record.getDocumentType(),
+                                                                record.getMatchedBy(),
+                                                                record.getConfidenceScore(),
+                                                                record.getStatus());
+
+                                                        return record;
+                                                    });
+                                        });
+                            });
                 })
                 .flatMap(documentRepository::save)
                 .onErrorResume(error -> {
-                    log.error(
-                            "Pipeline thất bại cho document ID {}",
-                            record.getId(),
-                            error
-                    );
-
+                    log.error("Pipeline thất bại cho document ID {}", record.getId(), error);
                     record.setStatus("FAILED");
-
                     return documentRepository.save(record)
                             .onErrorResume(saveError -> {
-                                log.error(
-                                        "Không thể cập nhật trạng thái FAILED cho document ID {}",
-                                        record.getId(),
-                                        saveError
-                                );
+                                log.error("Không thể cập nhật trạng thái FAILED cho document ID {}", record.getId(), saveError);
                                 return Mono.just(record);
                             });
                 });
+    }
+
+    // Hàm tiện ích: Đánh dấu file lỗi nếu có sự cố
+    private Mono<Document> markAsFailed(Document record) {
+        record.setStatus("FAILED");
+        return documentRepository.save(record);
     }
 }

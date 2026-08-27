@@ -1,10 +1,13 @@
 package com.company.bizocr.controller;
 
+import com.company.bizocr.classify.ClassifierService;
+import com.company.bizocr.model.dto.ClassifyResult;
 import com.company.bizocr.model.dto.request.DocumentUpdateRequest;
 import com.company.bizocr.model.dto.response.DocumentPageResponse;
 import com.company.bizocr.model.dto.response.UploadResponse;
-import com.company.bizocr.model.entity.DocumentRecord;
+import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.repository.DocumentRepository;
+import com.company.bizocr.service.DocumentReviewService;
 import com.company.bizocr.service.ExcelExportService;
 import com.company.bizocr.storage.StorageService;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +24,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @RestController
@@ -32,13 +36,15 @@ public class DocumentController {
     private final StorageService storageService;
     private final ReactiveStringRedisTemplate redisTemplate;
     private final ExcelExportService excelExportService;
+    private final ClassifierService classifierService;
+    private final DocumentReviewService documentReviewService;
 
-    // API Upload tập trung: Lưu đĩa -> Tạo DB -> Đẩy vào Redis Queue (Đã thêm log theo dõi Push)
+    // 1. API Upload tập trung (Lưu đĩa -> Tạo DB -> Đẩy Redis Queue)
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Mono<UploadResponse> uploadDocument(@RequestPart("file") FilePart filePart) {
         return storageService.saveFile(filePart)
                 .flatMap(savedFilePath -> {
-                    DocumentRecord record = DocumentRecord.builder()
+                    Document record = Document.builder()
                             .fileName(filePart.filename())
                             .filePath(savedFilePath)
                             .status("PENDING")
@@ -72,6 +78,28 @@ public class DocumentController {
                         .build());
     }
 
+    // 2. API Phân loại nhanh văn bản OCR (Fix lỗi 405 Method Not Allowed trên Postman)
+    @PostMapping("/classify")
+    public Mono<ClassifyResult> classifyDocument(@RequestBody Map<String, String> request) {
+        String rawOcrText = request.get("rawOcrText");
+        return classifierService.classifyDocument(rawOcrText);
+    }
+
+    // 3. API Phê duyệt chứng từ & Đồng bộ dữ liệu sang Python ML (Fix lỗi 404 Not Found trên Postman)
+    @PostMapping("/{id}/approve")
+    public Mono<Void> approveDocument(
+            @PathVariable Long id,
+            @RequestParam(required = false) String approvedType,
+            @RequestBody(required = false) Map<String, String> body) {
+
+        String type = (approvedType != null && !approvedType.isBlank())
+                ? approvedType
+                : (body != null ? body.get("approvedType") : "UNKNOWN");
+
+        return documentReviewService.approveDocument(id, type);
+    }
+
+    // 4. API Lấy file vật lý để hiển thị UI
     @GetMapping("/{id}/file")
     public Mono<ResponseEntity<Resource>> getDocumentFile(@PathVariable Long id) {
         return documentRepository.findById(id)
@@ -89,7 +117,7 @@ public class DocumentController {
                 });
     }
 
-    // 1. API Lấy danh sách chứng từ (Có phân trang & Lọc)
+    // 5. API Lấy danh sách chứng từ (Phân trang & Lọc)
     @GetMapping
     public Mono<DocumentPageResponse> getDocuments(
             @RequestParam(required = false) String status,
@@ -99,13 +127,13 @@ public class DocumentController {
 
         long offset = (long) page * size;
 
-        Mono<List<DocumentRecord>> itemsMono = documentRepository.findByFilter(status, documentType, size, offset)
+        Mono<List<Document>> itemsMono = documentRepository.findByFilter(status, documentType, size, offset)
                 .collectList();
         Mono<Long> totalMono = documentRepository.countByFilter(status, documentType);
 
         return Mono.zip(itemsMono, totalMono)
                 .map(tuple -> {
-                    List<DocumentRecord> items = tuple.getT1();
+                    List<Document> items = tuple.getT1();
                     long total = tuple.getT2();
                     int totalPages = (int) Math.ceil((double) total / size);
 
@@ -119,16 +147,16 @@ public class DocumentController {
                 });
     }
 
-    // 2. API Xem chi tiết 1 chứng từ
+    // 6. API Xem chi tiết 1 chứng từ
     @GetMapping("/{id}")
-    public Mono<DocumentRecord> getDocumentById(@PathVariable Long id) {
+    public Mono<Document> getDocumentById(@PathVariable Long id) {
         return documentRepository.findById(id)
                 .switchIfEmpty(Mono.error(new RuntimeException("Không tìm thấy chứng từ với ID: " + id)));
     }
 
-    // 3. API Kiểm duyệt & Chỉnh sửa chứng từ (Human-in-the-Loop)
+    // 7. API Cập nhật thông tin chứng từ tổng quát
     @PutMapping("/{id}")
-    public Mono<DocumentRecord> updateDocument(
+    public Mono<Document> updateDocument(
             @PathVariable Long id,
             @RequestBody DocumentUpdateRequest request) {
         return documentRepository.findById(id)
@@ -142,7 +170,7 @@ public class DocumentController {
                 });
     }
 
-    // 4. API Xuất báo cáo Excel
+    // 8. API Xuất báo cáo Excel
     @GetMapping("/export")
     public Mono<ResponseEntity<byte[]>> exportApprovedDocuments() {
         return documentRepository.findAll()

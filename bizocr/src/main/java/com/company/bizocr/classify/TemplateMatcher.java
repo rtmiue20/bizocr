@@ -98,6 +98,7 @@ public class TemplateMatcher {
                     .confidenceScore(Math.min(maxScore, 1.0)) // Max là 1.0
                     .matchedBy("TEMPLATE_MATCHING")
                     .success(true)
+                    .outlier(false)
                     .build());
         }
 
