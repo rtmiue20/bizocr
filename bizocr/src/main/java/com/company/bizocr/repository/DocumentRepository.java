@@ -18,4 +18,12 @@ public interface DocumentRepository extends ReactiveCrudRepository<Document, Lon
             "(:status IS NULL OR status = :status) AND " +
             "(:documentType IS NULL OR document_type = :documentType)")
     Mono<Long> countByFilter(String status, String documentType);
+
+    @Query("SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(extracted_fields, '$.total_amount')) AS DOUBLE) " +
+            "FROM documents " +
+            "WHERE document_type = :docType " +
+            "  AND JSON_UNQUOTE(JSON_EXTRACT(extracted_fields, '$.tax_code')) = :taxCode " +
+            "  AND status = 'APPROVED' " +
+            "ORDER BY id DESC LIMIT 20")
+    Flux<Double> findHistoricalAmounts(String docType, String taxCode);
 }

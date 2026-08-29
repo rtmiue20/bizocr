@@ -6,9 +6,9 @@ import com.company.bizocr.extract.FieldExtractorService;
 import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.ocr.OcrClientService;
 import com.company.bizocr.repository.DocumentRepository;
-import org.springframework.core.io.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.Resource;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -17,6 +17,20 @@ import reactor.core.publisher.Mono;
 @Service
 @RequiredArgsConstructor
 public class PipelineOrchestrator {
+
+    // Enum quản lý các chiến lược phân loại & bóc tách chứng từ
+    public enum MatchStrategy {
+        TEMPLATE_MATCHING,
+        REGEX_PARSER,
+        OLLAMA_LOCAL,
+        AI_FALLBACK;
+
+        public static boolean isAiFallback(String matchedBy) {
+            if (matchedBy == null) return false;
+            return OLLAMA_LOCAL.name().equalsIgnoreCase(matchedBy)
+                    || AI_FALLBACK.name().equalsIgnoreCase(matchedBy);
+        }
+    }
 
     private final OcrClientService ocrClientService;
     private final ClassifierService classifierService;
@@ -48,8 +62,7 @@ public class PipelineOrchestrator {
                                     log.info("Đã match công ty: {} với score {}",
                                             companyInfo.getCompanyName(),
                                             companyInfo.getMatchScore());
-                                    // Bỏ comment dòng dưới nếu DocumentRecord đã có thuộc tính companyId
-                                    // initialRecord.setCompanyId(companyInfo.getCompanyId());
+                                    initialRecord.setCompanyId(companyInfo.getCompanyId());
                                 }
 
                                 // Bước 2: Phân loại chứng từ
@@ -57,11 +70,17 @@ public class PipelineOrchestrator {
                                         .flatMap(classifyResult -> {
                                             initialRecord.setDocumentType(classifyResult.getDocumentType());
                                             initialRecord.setConfidenceScore(classifyResult.getConfidenceScore());
-                                            initialRecord.setMatchedBy(classifyResult.getMatchedBy());
 
-                                            boolean usedAiFallback = "AI_FALLBACK".equalsIgnoreCase(classifyResult.getMatchedBy())
-                                                    || "OLLAMA_LOCAL".equalsIgnoreCase(classifyResult.getMatchedBy());
+                                            // Kiểm tra và chuẩn hóa nhãn Engine Fallback
+                                            boolean usedAiFallback = MatchStrategy.isAiFallback(classifyResult.getMatchedBy());
                                             initialRecord.setUsedAiFallback(usedAiFallback);
+
+                                            // Thống nhất ghi nhận nhãn OLLAMA_LOCAL vào DB nếu dùng AI Fallback
+                                            String normalizedMatchedBy = usedAiFallback
+                                                    ? MatchStrategy.OLLAMA_LOCAL.name()
+                                                    : classifyResult.getMatchedBy();
+                                            initialRecord.setMatchedBy(normalizedMatchedBy);
+
                                             initialRecord.setModelVersion("template-v1");
 
                                             // Bước 3: Bóc tách dữ liệu
@@ -86,7 +105,7 @@ public class PipelineOrchestrator {
                                                         log.info("Document {}: type={}, matchedBy={}, status={}",
                                                                 initialRecord.getId(),
                                                                 classifyResult.getDocumentType(),
-                                                                classifyResult.getMatchedBy(),
+                                                                initialRecord.getMatchedBy(),
                                                                 initialRecord.getStatus());
 
                                                         return initialRecord;
@@ -129,7 +148,7 @@ public class PipelineOrchestrator {
                                     log.info("Đã match công ty: {} với score {}",
                                             companyInfo.getCompanyName(),
                                             companyInfo.getMatchScore());
-                                    // record.setCompanyId(companyInfo.getCompanyId());
+                                    record.setCompanyId(companyInfo.getCompanyId());
                                 }
 
                                 // Bước 2: Phân loại chứng từ
@@ -137,11 +156,17 @@ public class PipelineOrchestrator {
                                         .flatMap(classifyResult -> {
                                             record.setDocumentType(classifyResult.getDocumentType());
                                             record.setConfidenceScore(classifyResult.getConfidenceScore());
-                                            record.setMatchedBy(classifyResult.getMatchedBy());
 
-                                            boolean usedAiFallback = "AI_FALLBACK".equalsIgnoreCase(classifyResult.getMatchedBy())
-                                                    || "OLLAMA_LOCAL".equalsIgnoreCase(classifyResult.getMatchedBy());
+                                            // Kiểm tra và chuẩn hóa nhãn Engine Fallback
+                                            boolean usedAiFallback = MatchStrategy.isAiFallback(classifyResult.getMatchedBy());
                                             record.setUsedAiFallback(usedAiFallback);
+
+                                            // Thống nhất ghi nhận nhãn OLLAMA_LOCAL vào DB nếu dùng AI Fallback
+                                            String normalizedMatchedBy = usedAiFallback
+                                                    ? MatchStrategy.OLLAMA_LOCAL.name()
+                                                    : classifyResult.getMatchedBy();
+                                            record.setMatchedBy(normalizedMatchedBy);
+
                                             record.setModelVersion("template-v1");
 
                                             // Bước 3: Bóc tách dữ liệu

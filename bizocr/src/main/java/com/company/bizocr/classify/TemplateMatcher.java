@@ -35,8 +35,14 @@ public class TemplateMatcher {
 
         // 2. Hợp đồng kinh tế / Lao động (Contract)
         keywordRules.put("CONTRACT", List.of(
-                "cộng hòa xã hội chủ nghĩa việt nam", "độc lập tự do hạnh phúc",
-                "hợp đồng", "bên a", "bên b", "điều khoản", "trách nhiệm của các bên"
+                "cộng hòa xã hội chủ nghĩa việt nam",
+                "độc lập tự do hạnh phúc",
+                "hợp đồng",
+                "bên a",
+                "bên b",
+                "điều khoản",
+                "trách nhiệm của các bên",
+                "scan"
         ));
 
         // 3. Danh thiếp (Name Card)
@@ -50,11 +56,7 @@ public class TemplateMatcher {
                 "căn cước công dân", "chứng minh nhân dân", "số / no",
                 "họ và tên", "ngày sinh", "quốc tịch", "quê quán"
         ));
-        // 5.
-        keywordRules.put("CONTRACT", List.of(
-                "cộng hòa xã hội chủ nghĩa việt nam", "độc lập tự do hạnh phúc",
-                "hợp đồng", "bên a", "bên b", "điều khoản", "scan" // Thêm chữ scan vào đây
-        ));
+
     }
 
     /**

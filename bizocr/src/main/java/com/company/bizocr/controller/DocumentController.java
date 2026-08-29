@@ -87,16 +87,14 @@ public class DocumentController {
 
     // 3. API Phê duyệt chứng từ & Đồng bộ dữ liệu sang Python ML (Fix lỗi 404 Not Found trên Postman)
     @PostMapping("/{id}/approve")
-    public Mono<Void> approveDocument(
+    public Mono<ResponseEntity<Void>> approveDocument(
             @PathVariable Long id,
-            @RequestParam(required = false) String approvedType,
-            @RequestBody(required = false) Map<String, String> body) {
+            @RequestParam String approvedType,
+            java.security.Principal principal) {
 
-        String type = (approvedType != null && !approvedType.isBlank())
-                ? approvedType
-                : (body != null ? body.get("approvedType") : "UNKNOWN");
-
-        return documentReviewService.approveDocument(id, type);
+        String currentUser = (principal != null) ? principal.getName() : "system_admin";
+        return documentReviewService.approveDocument(id, approvedType, currentUser)
+                .thenReturn(ResponseEntity.ok().build());
     }
 
     // 4. API Lấy file vật lý để hiển thị UI

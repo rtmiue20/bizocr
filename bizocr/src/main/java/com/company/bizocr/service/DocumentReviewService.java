@@ -26,14 +26,13 @@ public class DocumentReviewService {
     /**
      * Phê duyệt chứng từ & kích hoạt đồng bộ dữ liệu (Collect + Extract + Anomaly)
      */
-    public Mono<Void> approveDocument(Long documentId, String approvedType) {
+    public Mono<Void> approveDocument(Long documentId, String approvedType, String reviewedBy) {
         return documentRepository.findById(documentId)
                 .flatMap(doc -> {
-                    // Cập nhật thông tin phê duyệt cơ bản
                     doc.setDocumentType(approvedType);
-                    doc.setStatus("APPROVED"); // Trạng thái mặc định, có thể đổi thành WARNING_ANOMALY ở bước ML
+                    doc.setStatus("APPROVED");
                     doc.setReviewedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-                    doc.setReviewedBy("ketoan_admin");
+                    doc.setReviewedBy(reviewedBy); // Gán người dùng thực tế từ Security Context
 
                     return documentRepository.save(doc)
                             .flatMap(savedDoc -> {
@@ -98,17 +97,23 @@ public class DocumentReviewService {
             // Nếu có trường total_amount, ta gọi AI kiểm tra bất thường (Anomaly Detection)
             if (extractedJson.has("total_amount")) {
                 double currentAmount = extractedJson.get("total_amount").asDouble();
+                String taxCode = extractedJson.has("tax_code") ? extractedJson.get("tax_code").asText() : "";
 
-                // Mô phỏng dữ liệu lịch sử các tháng trước (vd: 10-12 triệu).
-                List<Double> historicalAmounts = List.of(10500000.0, 11000000.0, 11500000.0, 10800000.0, 12000000.0);
+                // 1. Truy vấn lịch sử số tiền các hóa đơn cũ cùng MST và Loại chứng từ từ MariaDB
+                return documentRepository.findHistoricalAmounts(doc.getDocumentType(), taxCode)
+                        .collectList()
+                        .flatMap(historicalAmounts -> {
+                            // Nếu doanh nghiệp mới chưa có lịch sử, dùng chính currentAmount để tránh lỗi mảng rỗng
+                            List<Double> history = historicalAmounts.isEmpty() ? List.of(currentAmount) : historicalAmounts;
 
-                return pythonMlClient.analyzeAnomaly(currentAmount, historicalAmounts)
+                            // 2. Gửi dữ liệu thực tế sang Python ML để tính toán Z-Score / Anomaly
+                            return pythonMlClient.analyzeAnomaly(currentAmount, history);
+                        })
                         .flatMap(anomalyResult -> {
-                            // Gắn kết quả AI cảnh báo vào chung chuỗi JSON extracted_fields
+                            // 3. Cập nhật kết quả phân tích vào JSON và chuyển status nếu có bất thường
                             if (anomalyResult != null && !anomalyResult.isEmpty()) {
                                 extractedJson.set("anomaly_analysis", anomalyResult);
 
-                                // Đánh dấu cảnh báo cho Kế toán nếu ML phát hiện bất thường
                                 if (anomalyResult.has("is_anomaly") && anomalyResult.get("is_anomaly").asBoolean()) {
                                     doc.setStatus("WARNING_ANOMALY");
                                     log.warn("[Anomaly] CẢNH BÁO: Phát hiện số tiền bất thường ở chứng từ #{}", doc.getId());
