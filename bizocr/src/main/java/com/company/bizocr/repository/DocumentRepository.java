@@ -8,22 +8,27 @@ import reactor.core.publisher.Mono;
 
 public interface DocumentRepository extends ReactiveCrudRepository<Document, Long> {
 
-    @Query("SELECT * FROM documents WHERE " +
+    @Query("SELECT * FROM documents WHERE company_id = :companyId AND " +
             "(:status IS NULL OR status = :status) AND " +
             "(:documentType IS NULL OR document_type = :documentType) " +
             "ORDER BY id DESC LIMIT :limit OFFSET :offset")
-    Flux<Document> findByFilter(String status, String documentType, int limit, long offset);
+    Flux<Document> findByFilterAndCompanyId(String status, String documentType, Long companyId, int limit, long offset);
 
-    @Query("SELECT COUNT(*) FROM documents WHERE " +
+    @Query("SELECT COUNT(*) FROM documents WHERE company_id = :companyId AND " +
             "(:status IS NULL OR status = :status) AND " +
             "(:documentType IS NULL OR document_type = :documentType)")
-    Mono<Long> countByFilter(String status, String documentType);
+    Mono<Long> countByFilterAndCompanyId(String status, String documentType, Long companyId);
 
     @Query("SELECT CAST(JSON_UNQUOTE(JSON_EXTRACT(extracted_fields, '$.total_amount')) AS DOUBLE) " +
             "FROM documents " +
-            "WHERE document_type = :docType " +
+            "WHERE company_id = :companyId " +
+            "  AND document_type = :docType " +
             "  AND JSON_UNQUOTE(JSON_EXTRACT(extracted_fields, '$.tax_code')) = :taxCode " +
             "  AND status = 'APPROVED' " +
             "ORDER BY id DESC LIMIT 20")
-    Flux<Double> findHistoricalAmounts(String docType, String taxCode);
+    Flux<Double> findHistoricalAmountsAndCompanyId(String docType, String taxCode, Long companyId);
+
+    Mono<Document> findByIdAndCompanyId(Long id, Long companyId);
+
+    Flux<Document> findByStatusAndCompanyId(String status, Long companyId);
 }

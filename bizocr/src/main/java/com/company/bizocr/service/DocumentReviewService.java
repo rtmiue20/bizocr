@@ -1,10 +1,12 @@
 package com.company.bizocr.service;
 
 import com.company.bizocr.client.PythonMlClient;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.repository.DocumentRepository;
+import org.springframework.beans.factory.annotation.Value;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -12,6 +14,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Iterator;
 import java.util.List;
 
 @Slf4j
@@ -22,6 +25,9 @@ public class DocumentReviewService {
     private final DocumentRepository documentRepository;
     private final PythonMlClient pythonMlClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Value("${bizocr.classification.ai-confidence-threshold}")
+    private double confidenceThreshold; // Spring set giá trị này qua field injection, không cần đưa vào constructor
 
     /**
      * Phê duyệt chứng từ & kích hoạt đồng bộ dữ liệu (Collect + Extract + Anomaly)
@@ -82,60 +88,66 @@ public class DocumentReviewService {
         try {
             ObjectNode extractedJson;
 
-            // KIỂM TRA FALLBACK: Nếu Python trả về rỗng/null, dùng lại data đang có trong DB
             if (extractedJsonStr != null && !extractedJsonStr.trim().isEmpty() && !extractedJsonStr.equals("{}")) {
                 extractedJson = (ObjectNode) objectMapper.readTree(extractedJsonStr);
             } else {
                 String existingFields = doc.getExtractedFields();
-                if (existingFields != null && !existingFields.trim().isEmpty()) {
-                    extractedJson = (ObjectNode) objectMapper.readTree(existingFields);
-                } else {
-                    extractedJson = objectMapper.createObjectNode();
-                }
+                extractedJson = (existingFields != null && !existingFields.trim().isEmpty())
+                        ? (ObjectNode) objectMapper.readTree(existingFields)
+                        : objectMapper.createObjectNode();
             }
 
-            // Nếu có trường total_amount, ta gọi AI kiểm tra bất thường (Anomaly Detection)
+            // --- TÍNH NĂNG MỚI: Kiểm tra Field Confidence ---
+            if (extractedJson.has("field_confidences")) {
+                JsonNode confidences = extractedJson.get("field_confidences");
+                boolean hasLowConfidence = false;
+
+                Iterator<String> fieldNames = confidences.fieldNames();
+                while (fieldNames.hasNext()) {
+                    String fieldName = fieldNames.next();
+                    double confidence = confidences.get(fieldName).asDouble();
+                    if (confidence < confidenceThreshold) {
+                        hasLowConfidence = true;
+                        log.info("[Confidence] Field '{}' có độ tin cậy thấp ({}). Cần người duyệt cho chứng từ #{}",
+                                fieldName, confidence, doc.getId());
+                        break;
+                    }
+                }
+
+                // Nếu điểm thấp, gán cờ NEED_REVIEW (trừ khi nó đã bị dính cảnh báo ANOMALY nặng hơn)
+                if (hasLowConfidence && !"WARNING_ANOMALY".equals(doc.getStatus())) {
+                    doc.setStatus("NEED_REVIEW");
+                }
+            }
+            // ------------------------------------------------
+
+            // Luồng Anomaly Detection hiện tại (Giữ nguyên)
             if (extractedJson.has("total_amount")) {
                 double currentAmount = extractedJson.get("total_amount").asDouble();
                 String taxCode = extractedJson.has("tax_code") ? extractedJson.get("tax_code").asText() : "";
 
-                // 1. Truy vấn lịch sử số tiền các hóa đơn cũ cùng MST và Loại chứng từ từ MariaDB
-                return documentRepository.findHistoricalAmounts(doc.getDocumentType(), taxCode)
+                return documentRepository.findHistoricalAmountsAndCompanyId(doc.getDocumentType(), taxCode, doc.getCompanyId())
                         .collectList()
                         .flatMap(historicalAmounts -> {
-                            // Nếu doanh nghiệp mới chưa có lịch sử, dùng chính currentAmount để tránh lỗi mảng rỗng
                             List<Double> history = historicalAmounts.isEmpty() ? List.of(currentAmount) : historicalAmounts;
-
-                            // 2. Gửi dữ liệu thực tế sang Python ML để tính toán Z-Score / Anomaly
                             return pythonMlClient.analyzeAnomaly(currentAmount, history);
                         })
                         .flatMap(anomalyResult -> {
-                            // 3. Cập nhật kết quả phân tích vào JSON và chuyển status nếu có bất thường
                             if (anomalyResult != null && !anomalyResult.isEmpty()) {
                                 extractedJson.set("anomaly_analysis", anomalyResult);
-
                                 if (anomalyResult.has("is_anomaly") && anomalyResult.get("is_anomaly").asBoolean()) {
-                                    doc.setStatus("WARNING_ANOMALY");
-                                    log.warn("[Anomaly] CẢNH BÁO: Phát hiện số tiền bất thường ở chứng từ #{}", doc.getId());
+                                    doc.setStatus("WARNING_ANOMALY"); // Anomaly ghi đè NEED_REVIEW vì tính nghiêm trọng cao hơn
                                 }
                             }
-
-                            doc.setExtractedFields(extractedJson.toString());
-                            return documentRepository.save(doc);
-                        })
-                        .onErrorResume(e -> {
-                            log.error("[Anomaly] Lỗi phân tích bất thường: {}", e.getMessage());
                             doc.setExtractedFields(extractedJson.toString());
                             return documentRepository.save(doc);
                         });
             } else {
-                // Không có số tiền thì lưu bình thường, không chạy Anomaly
                 doc.setExtractedFields(extractedJson.toString());
                 return documentRepository.save(doc);
             }
         } catch (Exception e) {
             log.error("[Extract] Lỗi parse JSON bóc tách cho chứng từ #{}: {}", doc.getId(), e.getMessage());
-            // Tránh văng exception làm crash Reactive stream
             return documentRepository.save(doc);
         }
     }
