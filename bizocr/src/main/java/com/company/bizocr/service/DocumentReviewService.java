@@ -1,9 +1,9 @@
 package com.company.bizocr.service;
 
 import com.company.bizocr.client.PythonMlClient;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.repository.DocumentRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,7 +27,7 @@ public class DocumentReviewService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${bizocr.classification.ai-confidence-threshold}")
-    private double confidenceThreshold; // Spring set giá trị này qua field injection, không cần đưa vào constructor
+    private double confidenceThreshold;
 
     /**
      * Phê duyệt chứng từ & kích hoạt đồng bộ dữ liệu (Collect + Extract + Anomaly)
@@ -38,23 +38,20 @@ public class DocumentReviewService {
                     doc.setDocumentType(approvedType);
                     doc.setStatus("APPROVED");
                     doc.setReviewedAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-                    doc.setReviewedBy(reviewedBy); // Gán người dùng thực tế từ Security Context
+                    doc.setReviewedBy(reviewedBy);
 
                     return documentRepository.save(doc)
                             .flatMap(savedDoc -> {
                                 log.info("[Review] Đã duyệt chứng từ #{}, kích hoạt thu thập & bóc tách...", documentId);
 
-                                // 1. Gửi dữ liệu về Python để gom label (Collect data)
                                 Mono<Void> collectMono = pythonMlClient.collectApprovedData(savedDoc.getRawOcrText(), approvedType)
                                         .onErrorResume(e -> {
                                             log.error("[Collect] Bỏ qua lỗi gửi data sang Python: {}", e.getMessage());
                                             return Mono.empty();
                                         });
 
-                                // 2. Kích hoạt bóc tách & phân tích bất thường tự động
                                 Mono<Document> extractMono = extractAndSaveFields(savedDoc.getId());
 
-                                // Chạy song song cả 2 tác vụ
                                 return Mono.when(collectMono, extractMono);
                             });
                 });
@@ -70,12 +67,10 @@ public class DocumentReviewService {
                         return Mono.just(doc);
                     }
 
-                    // Gọi Python bóc tách Regex/NLP
                     return pythonMlClient.extractFields(doc.getRawOcrText(), doc.getDocumentType())
                             .flatMap(extractedJsonStr -> processExtractedJson(doc, extractedJsonStr))
                             .onErrorResume(e -> {
                                 log.error("[Extract] Bóc tách lỗi ở chứng từ #{}, giữ nguyên field cũ. Lỗi: {}", doc.getId(), e.getMessage());
-                                // Fallback: Truyền null để hàm processExtractedJson tự lấy data cũ trong DB
                                 return processExtractedJson(doc, null);
                             });
                 });
@@ -97,12 +92,12 @@ public class DocumentReviewService {
                         : objectMapper.createObjectNode();
             }
 
-            // --- TÍNH NĂNG MỚI: Kiểm tra Field Confidence ---
+            // --- Kiểm tra Field Confidence ---
             if (extractedJson.has("field_confidences")) {
                 JsonNode confidences = extractedJson.get("field_confidences");
                 boolean hasLowConfidence = false;
 
-                Iterator<String> fieldNames = confidences.fieldNames();
+                Iterator<String> fieldNames = confidences.propertyNames().iterator(); // Jackson 3: propertyNames() thay cho fieldNames()
                 while (fieldNames.hasNext()) {
                     String fieldName = fieldNames.next();
                     double confidence = confidences.get(fieldName).asDouble();
@@ -114,17 +109,16 @@ public class DocumentReviewService {
                     }
                 }
 
-                // Nếu điểm thấp, gán cờ NEED_REVIEW (trừ khi nó đã bị dính cảnh báo ANOMALY nặng hơn)
                 if (hasLowConfidence && !"WARNING_ANOMALY".equals(doc.getStatus())) {
                     doc.setStatus("NEED_REVIEW");
                 }
             }
             // ------------------------------------------------
 
-            // Luồng Anomaly Detection hiện tại (Giữ nguyên)
+            // Luồng Anomaly Detection
             if (extractedJson.has("total_amount")) {
                 double currentAmount = extractedJson.get("total_amount").asDouble();
-                String taxCode = extractedJson.has("tax_code") ? extractedJson.get("tax_code").asText() : "";
+                String taxCode = extractedJson.has("tax_code") ? extractedJson.get("tax_code").asString() : ""; // Jackson 3: asString() thay cho asText()
 
                 return documentRepository.findHistoricalAmountsAndCompanyId(doc.getDocumentType(), taxCode, doc.getCompanyId())
                         .collectList()
@@ -136,7 +130,7 @@ public class DocumentReviewService {
                             if (anomalyResult != null && !anomalyResult.isEmpty()) {
                                 extractedJson.set("anomaly_analysis", anomalyResult);
                                 if (anomalyResult.has("is_anomaly") && anomalyResult.get("is_anomaly").asBoolean()) {
-                                    doc.setStatus("WARNING_ANOMALY"); // Anomaly ghi đè NEED_REVIEW vì tính nghiêm trọng cao hơn
+                                    doc.setStatus("WARNING_ANOMALY");
                                 }
                             }
                             doc.setExtractedFields(extractedJson.toString());

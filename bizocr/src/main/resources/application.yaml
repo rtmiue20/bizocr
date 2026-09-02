@@ -83,11 +83,11 @@ spring:
       connect-timeout: 5000ms
       timeout: 5000ms
 
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${JWT_ISSUER_URI:https://auth.company.com/realms/bizocr}
+#  security:
+#    oauth2:
+#      resourceserver:
+#        jwt:
+#          issuer-uri: ${JWT_ISSUER_URI:https://auth.company.com/realms/bizocr}
 
 logging:
   level:
