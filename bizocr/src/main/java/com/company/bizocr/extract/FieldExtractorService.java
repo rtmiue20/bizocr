@@ -43,11 +43,24 @@ public class FieldExtractorService {
                 regexFields = extractElectricityFields(rawText);
             } else if ("WATER_BILL".equalsIgnoreCase(documentType) || "HOA_DON_NUOC".equalsIgnoreCase(documentType)) {
                 regexFields = extractWaterFields(rawText);
+            } else if ("SERVICE_PAYMENT_VOUCHER".equalsIgnoreCase(documentType)
+                    || "RECEIPT".equalsIgnoreCase(documentType)
+                    || "SERVICE_BILL".equalsIgnoreCase(documentType)) {
+                regexFields = extractServicePaymentFields(rawText);
+            } else if ("CONTRACT".equalsIgnoreCase(documentType) || "HOP_DONG".equalsIgnoreCase(documentType)) {
+                regexFields = extractContractFields(rawText);
             }
 
-            // Đã SỬA: Dùng tax_code thay vì seller_tax_code
-            boolean regexSuccess = (regexFields.containsKey("tax_code") || regexFields.containsKey("customer_id"))
-                    && regexFields.containsKey("total_amount");
+            // Kiểm tra độ hoàn thiện của trường trích xuất bằng Regex
+            boolean hasRequiredIdentifier = regexFields.containsKey("tax_code")
+                    || regexFields.containsKey("customer_id")
+                    || regexFields.containsKey("service_name")
+                    || regexFields.containsKey("party_a")
+                    || "SERVICE_PAYMENT_VOUCHER".equalsIgnoreCase(documentType)
+                    || "RECEIPT".equalsIgnoreCase(documentType)
+                    || "SERVICE_BILL".equalsIgnoreCase(documentType);
+
+            boolean regexSuccess = hasRequiredIdentifier && regexFields.containsKey("total_amount");
 
             if (regexSuccess) {
                 log.info("Bóc tách bằng Regex thành công cho loại chứng từ: {}", documentType);
@@ -152,7 +165,7 @@ public class FieldExtractorService {
         return fields;
     }
 
-    // 2. Regex bóc tách Hóa đơn Điện (giữ nguyên)
+    // 2. Regex bóc tách Hóa đơn Điện
     private Map<String, Object> extractElectricityFields(String text) {
         Map<String, Object> fields = new HashMap<>();
         Pattern custPattern = Pattern.compile("(?:Thẻ khách hàng|Mã KH|Mã khách hàng)[:\\s]*([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
@@ -160,7 +173,7 @@ public class FieldExtractorService {
         if (custMatcher.find()) {
             fields.put("customer_id", custMatcher.group(1));
         }
-        Pattern amountPattern = Pattern.compile("(?:Tổng cộng tiền thanh toán|Tổng tiền thanh toán|Tổng tiền|Thành tiền)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
+        Pattern amountPattern = Pattern.compile("(?:Tổng cộng tiền thanh toán|Tổng tiền điện thanh toán|Tổng tiền thanh toán|Tiền điện|Tổng tiền|Thành tiền)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
         Matcher amountMatcher = amountPattern.matcher(text);
         if (amountMatcher.find()) {
             fields.put("total_amount", parseAmount(amountMatcher.group(1)));
@@ -168,7 +181,7 @@ public class FieldExtractorService {
         return fields;
     }
 
-    // 3. Regex bóc tách Hóa đơn Nước (giữ nguyên)
+    // 3. Regex bóc tách Hóa đơn Nước
     private Map<String, Object> extractWaterFields(String text) {
         Map<String, Object> fields = new HashMap<>();
         Pattern dbPattern = Pattern.compile("(?:Mã danh bộ|Số danh bộ|Mã KH|Mã khách hàng)[:\\s]*([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
@@ -181,6 +194,56 @@ public class FieldExtractorService {
         if (amountMatcher.find()) {
             fields.put("total_amount", parseAmount(amountMatcher.group(1)));
         }
+        return fields;
+    }
+
+    // 4. Regex bóc tách Phiếu thanh toán dịch vụ / Hóa đơn bán lẻ
+    private Map<String, Object> extractServicePaymentFields(String text) {
+        Map<String, Object> fields = new HashMap<>();
+
+        // Tìm tên dịch vụ / đơn vị từ dòng đầu tiên hoặc từ khóa
+        String[] lines = text.split("\\r?\\n");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty() && !trimmed.toLowerCase().contains("phiếu thanh toán")
+                    && !trimmed.toLowerCase().contains("tổng chi phí")
+                    && !trimmed.toLowerCase().contains("thành tiền")) {
+                fields.put("service_name", trimmed);
+                break;
+            }
+        }
+
+        Pattern amountPattern = Pattern.compile("(?:Tổng chi phí|Tổng cộng tiền thanh toán|Tổng tiền thanh toán|Tổng tiền|Thành tiền|Tổng cộng)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
+        Matcher amountMatcher = amountPattern.matcher(text);
+        if (amountMatcher.find()) {
+            fields.put("total_amount", parseAmount(amountMatcher.group(1)));
+        }
+
+        return fields;
+    }
+
+    // 5. Regex bóc tách Hợp đồng / Biên bản quyết toán
+    private Map<String, Object> extractContractFields(String text) {
+        Map<String, Object> fields = new HashMap<>();
+
+        Pattern partyAPattern = Pattern.compile("(?:Bên A|Ben A)[:\\s]*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+        Matcher partyAMatcher = partyAPattern.matcher(text);
+        if (partyAMatcher.find()) {
+            fields.put("party_a", partyAMatcher.group(1).trim());
+        }
+
+        Pattern partyBPattern = Pattern.compile("(?:Bên B|Ben B)[:\\s]*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+        Matcher partyBMatcher = partyBPattern.matcher(text);
+        if (partyBMatcher.find()) {
+            fields.put("party_b", partyBMatcher.group(1).trim());
+        }
+
+        Pattern amountPattern = Pattern.compile("(?:Giá trị quyết toán|Giá trị hợp đồng|Tổng cộng|Tổng tiền)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
+        Matcher amountMatcher = amountPattern.matcher(text);
+        if (amountMatcher.find()) {
+            fields.put("total_amount", parseAmount(amountMatcher.group(1)));
+        }
+
         return fields;
     }
 

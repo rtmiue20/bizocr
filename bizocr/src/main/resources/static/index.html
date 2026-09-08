@@ -3,296 +3,702 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BizOCR - Hệ thống Xử lý Chứng từ Thông minh</title>
-    <!-- Tailwind CSS qua CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>BizOCR — API Test Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #10141c;
+            --panel: #171d2a;
+            --panel-2: #1d2433;
+            --border: #262e40;
+            --text: #e4e8f0;
+            --muted: #8b93a8;
+            --accent: #d9a441;
+            --accent-dim: #a37b32;
+            --ok: #4caf82;
+            --warn: #e0a13c;
+            --err: #d9614f;
+            --review: #7c9ce8;
+        }
+        * { box-sizing: border-box; }
+        html, body { margin:0; padding:0; height:100%; background:var(--bg); color:var(--text); font-family:'Inter',-apple-system,sans-serif; font-size:14px; }
+        code, pre, .mono { font-family:'JetBrains Mono', monospace; }
+        ::-webkit-scrollbar { width:8px; height:8px; }
+        ::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+        ::-webkit-scrollbar-track { background:transparent; }
+
+        button { background:var(--accent); color:#1a1508; border:none; padding:9px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; font-family:inherit; transition:filter .12s, transform .05s; }
+        button:hover { filter:brightness(1.08); }
+        button:active { transform:scale(.98); }
+        button:disabled { opacity:.45; cursor:not-allowed; }
+        button.secondary { background:transparent; color:var(--text); border:1px solid var(--border); }
+        button.secondary:hover { background:var(--panel-2); }
+        button.small { padding:5px 10px; font-size:11.5px; }
+
+        input, select, textarea { background:var(--bg); border:1px solid var(--border); color:var(--text); padding:8px 10px; border-radius:6px; font-size:13px; font-family:inherit; outline:none; width:100%; }
+        textarea { font-family:'JetBrains Mono', monospace; font-size:12.5px; resize:vertical; }
+        input:focus, select:focus, textarea:focus { border-color:var(--accent-dim); }
+        input::placeholder, textarea::placeholder { color:#4a5268; }
+        label { font-size:12px; color:var(--muted); display:block; margin-bottom:5px; }
+        .field { margin-bottom:10px; }
+        .row { display:flex; gap:10px; flex-wrap:wrap; }
+        .row > .field { flex:1; min-width:160px; }
+
+        .card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:18px 20px; margin-bottom:16px; }
+        .card h3 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; margin:0 0 14px; }
+        .hint { font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.5; }
+        .empty { color:var(--muted); font-size:13px; padding:24px 0; text-align:center; }
+
+        .badge { display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; }
+        .badge.PENDING { background:rgba(139,147,168,.15); color:var(--muted); }
+        .badge.PROCESSING { background:rgba(224,161,60,.15); color:var(--warn); }
+        .badge.COMPLETED { background:rgba(76,175,130,.15); color:var(--ok); }
+        .badge.APPROVED { background:rgba(76,175,130,.15); color:var(--ok); }
+        .badge.NEED_REVIEW { background:rgba(124,156,232,.15); color:var(--review); }
+        .badge.WARNING_ANOMALY { background:rgba(217,97,79,.15); color:var(--err); }
+        .badge.REJECTED { background:rgba(217,97,79,.15); color:var(--err); }
+
+        .kv-table { width:100%; border-collapse:collapse; font-size:13px; }
+        .kv-table td { padding:8px 6px; border-bottom:1px solid var(--border); }
+        .kv-table td:first-child { color:var(--muted); width:38%; }
+        .kv-table td:last-child { font-family:'JetBrains Mono', monospace; word-break:break-all; }
+
+        .step-tag { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--panel-2); border:1px solid var(--border); color:var(--accent); font-weight:700; font-size:11.5px; margin-right:8px; flex-shrink:0; }
+
+        /* ---------------- LOGIN SCREEN ---------------- */
+        .login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px 20px; }
+        .login-box { width:100%; max-width:620px; }
+        .login-brand { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+        .login-brand .mark { width:12px; height:12px; border-radius:2px; background:var(--accent); transform:rotate(45deg); }
+        .login-brand h1 { font-size:20px; margin:0; font-weight:700; letter-spacing:-0.01em; }
+        .login-sub { color:var(--muted); font-size:13px; margin:0 0 26px; }
+        .login-result { margin-top:12px; }
+        .login-result .ok-text { color:var(--ok); font-size:13px; }
+        .login-result .err-text { color:var(--err); font-size:13px; }
+        .toggle-row { display:flex; gap:6px; margin-bottom:14px; }
+        .toggle-btn { flex:1; padding:8px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--muted); font-size:12.5px; cursor:pointer; }
+        .toggle-btn.active { background:var(--panel-2); color:var(--text); border-color:var(--accent-dim); }
+
+        /* ---------------- APP SHELL ---------------- */
+        .app { display:grid; grid-template-columns:230px 1fr 380px; height:100vh; }
+        .sidebar { background:var(--panel); border-right:1px solid var(--border); padding:20px 14px; display:flex; flex-direction:column; }
+        .brand { display:flex; align-items:baseline; gap:8px; margin-bottom:2px; }
+        .brand .mark { width:10px; height:10px; border-radius:2px; background:var(--accent); transform:rotate(45deg); flex-shrink:0; }
+        .brand h1 { font-size:16px; font-weight:700; margin:0; letter-spacing:-0.01em; }
+        .brand-sub { color:var(--muted); font-size:11.5px; margin:0 0 20px 18px; }
+
+        .nav-item { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:6px; color:var(--muted); cursor:pointer; font-size:13px; font-weight:500; border:1px solid transparent; margin-bottom:2px; transition:background .12s, color .12s; }
+        .nav-item:hover { background:var(--panel-2); color:var(--text); }
+        .nav-item.active { background:var(--panel-2); color:var(--text); border-color:var(--border); }
+        .nav-item .dot { width:6px; height:6px; border-radius:50%; background:var(--border); flex-shrink:0; }
+        .nav-item.active .dot { background:var(--accent); }
+
+        .sidebar-foot { margin-top:auto; padding-top:14px; border-top:1px solid var(--border); }
+        .who { font-size:12px; margin-bottom:4px; }
+        .who .k { color:var(--muted); }
+
+        .main { padding:26px 32px; overflow-y:auto; }
+        .panel-title { font-size:19px; font-weight:700; margin:0 0 4px; letter-spacing:-0.01em; display:flex; align-items:center; }
+        .panel-desc { color:var(--muted); font-size:13px; margin:0 0 20px 30px; max-width:64ch; line-height:1.5; }
+
+        .docid-bar { display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 14px; margin-bottom:20px; }
+        .docid-bar label { margin:0; white-space:nowrap; }
+        .docid-bar input { font-family:'JetBrains Mono', monospace; }
+
+        .drop-zone { border:1.5px dashed var(--border); border-radius:8px; padding:28px; text-align:center; color:var(--muted); font-size:13px; cursor:pointer; transition:border-color .15s, background .15s; }
+        .drop-zone:hover, .drop-zone.drag { border-color:var(--accent-dim); background:var(--panel-2); }
+        .drop-zone strong { color:var(--text); }
+        .file-chip { display:inline-flex; align-items:center; gap:8px; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:12.5px; margin-top:10px; }
+
+        .lbody { background:var(--bg); border:1px solid var(--border); border-radius:5px; padding:10px; margin-top:6px; max-height:260px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; color:#c3cadd; font-size:11.5px; font-family:'JetBrains Mono', monospace; }
+        .preview-frame { width:100%; height:420px; border:1px solid var(--border); border-radius:8px; background:#000; }
+        .preview-img { max-width:100%; border-radius:8px; border:1px solid var(--border); }
+
+        /* ---------------- LOG PANEL ---------------- */
+        .logpanel { background:#0c0f16; border-left:1px solid var(--border); display:flex; flex-direction:column; height:100vh; }
+        .logpanel-head { padding:16px 18px 12px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+        .logpanel-head h3 { margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; }
+        .logstream { flex:1; overflow-y:auto; padding:12px 16px; }
+        .logentry { border-bottom:1px solid var(--border); padding:12px 0; font-family:'JetBrains Mono', monospace; font-size:11.5px; }
+        .logentry:first-child { padding-top:0; }
+        .lline { display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
+        .method { font-weight:700; padding:1px 6px; border-radius:4px; font-size:10.5px; }
+        .method.GET { background:rgba(124,156,232,.18); color:var(--review); }
+        .method.POST { background:rgba(76,175,130,.18); color:var(--ok); }
+        .method.PATCH, .method.PUT { background:rgba(224,161,60,.18); color:var(--warn); }
+        .method.DELETE { background:rgba(217,97,79,.18); color:var(--err); }
+        .lstatus { font-weight:700; }
+        .lstatus.s2 { color:var(--ok); }
+        .lstatus.s4, .lstatus.s5, .lstatus.s0 { color:var(--err); }
+        .lpath { color:var(--muted); word-break:break-all; }
+        .ltime { color:#4a5268; margin-left:auto; font-size:10.5px; }
+
+        .split { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        @media (max-width:1150px) { .split { grid-template-columns:1fr; } }
+    </style>
 </head>
-<body class="bg-gray-100 font-sans h-screen flex flex-col">
+<body>
 
-<!-- Header -->
-<header class="bg-indigo-700 text-white shadow-md px-6 py-4 flex justify-between items-center">
-    <div class="flex items-center space-x-3">
-        <i class="fa-solid fa-[#00d2ff] fa-file-invoice text-2xl"></i>
-        <h1 class="text-xl font-bold tracking-wide">BizOCR Platform</h1>
-    </div>
-    <div class="text-sm bg-indigo-800 px-3 py-1 rounded-full text-indigo-200">
-        Spring WebFlux + RapidOCR Engine
-    </div>
-</header>
+<!-- ================= LOGIN SCREEN ================= -->
+<div id="loginScreen" class="login-wrap">
+    <div class="login-box">
+        <div class="login-brand"><div class="mark"></div><h1>BizOCR</h1></div>
+        <p class="login-sub">API Test Console — đăng nhập trước để lấy JWT, sau đó mới thao tác các bước còn lại.</p>
 
-<!-- Main Split-View Layout -->
-<div class="flex-1 flex overflow-hidden p-4 gap-4">
-
-    <!-- CỘT BÊN TRÁI: Danh sách & Xem Ảnh Chứng từ -->
-    <div class="w-1/2 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <!-- Upload Toolbar -->
-        <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-            <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
-                <i class="fa-solid fa-cloud-arrow-up"></i> Tải ảnh chứng từ mới
-                <input type="file" id="fileInput" class="hidden" accept="image/*" onchange="uploadFile()">
-            </label>
-            <button onclick="loadDocuments()" class="text-gray-600 hover:text-indigo-600 p-2 text-sm font-medium">
-                <i class="fa-solid fa-rotate-right"></i> Làm mới
-            </button>
-        </div>
-
-        <!-- Previews / Image View Header -->
-        <div class="p-3 bg-gray-100 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase flex justify-between">
-            <span>Xem Trước Ảnh Chứng Từ</span>
-            <span id="currentFileName" class="text-indigo-600">Chưa chọn chứng từ nào</span>
-        </div>
-
-        <!-- Frame Hiển thị Ảnh Xem Trực tiếp -->
-        <div class="flex-1 bg-gray-900 flex items-center justify-center p-2 relative overflow-auto min-h-[300px]">
-            <img id="documentImageViewer" src="" alt="Vui lòng chọn chứng từ" class="max-h-full max-w-full object-contain hidden border border-gray-700 rounded shadow-lg">
-            <div id="imagePlaceholder" class="text-gray-500 flex flex-col items-center">
-                <i class="fa-regular fa-image text-5xl mb-2"></i>
-                <p class="text-sm">Chọn một chứng từ từ danh sách để xem ảnh</p>
-            </div>
-        </div>
-
-        <!-- Danh sách Chứng từ Gần đây -->
-        <div class="h-48 border-t border-gray-200 overflow-y-auto">
-            <table class="w-full text-sm text-left text-gray-600">
-                <thead class="text-xs text-gray-700 uppercase bg-gray-50 sticky top-0">
-                <tr>
-                    <th class="px-4 py-2">ID</th>
-                    <th class="px-4 py-2">Tên Tệp</th>
-                    <th class="px-4 py-2">Loại</th>
-                    <th class="px-4 py-2">Trạng thái</th>
-                    <th class="px-4 py-2 text-right">Hành động</th>
-                </tr>
-                </thead>
-                <tbody id="documentTableBody">
-                <!-- Render danh sách qua Javascript -->
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- CỘT BÊN PHẢI: Form Dữ Liệu Bóc Tách (JSON Editor / Dynamic Fields) -->
-    <div class="w-1/2 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div class="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
-            <h2 class="font-bold text-gray-800 flex items-center gap-2">
-                <i class="fa-solid fa-code text-indigo-600"></i> Thông Tin Bóc Tách Chi Tiết
-            </h2>
-            <div id="docStatusBadge">
-                <span class="bg-gray-200 text-gray-700 text-xs font-medium px-2.5 py-0.5 rounded">Sẵn sàng</span>
-            </div>
-        </div>
-
-        <div class="flex-1 p-4 overflow-y-auto space-y-4">
-            <!-- Metadata General -->
-            <div class="grid grid-cols-2 gap-4 bg-gray-50 p-3 rounded-lg border border-gray-100 text-sm">
-                <div>
-                    <span class="text-gray-500 block text-xs">Loại chứng từ:</span>
-                    <strong id="metaDocType" class="text-gray-800">-</strong>
+        <div class="card">
+            <h3>Bước 0 — Kiểm tra Python service (tách biệt, không cần JWT)</h3>
+            <div class="row">
+                <div class="field">
+                    <label>Python service base URL</label>
+                    <input id="pyBaseUrl" value="http://localhost:8000">
                 </div>
-                <div>
-                    <span class="text-gray-500 block text-xs">Độ tin cậy (Confidence):</span>
-                    <strong id="metaConfidence" class="text-indigo-600">-</strong>
+                <div style="align-self:flex-end; margin-bottom:10px">
+                    <button class="secondary" id="btnOpenSwagger" type="button">Mở /docs (Swagger)</button>
                 </div>
             </div>
+            <div class="field">
+                <label>rawText (test /api/v1/extract)</label>
+                <textarea id="pyRawText" rows="3">Công ty TNHH ABC
+Mã số thuế: 0101234567
+Cộng tiền hàng: 1.500.000 đ</textarea>
+            </div>
+            <div class="row">
+                <div class="field"><label>documentType</label><input id="pyDocType" value="VAT_INVOICE"></div>
+                <div style="align-self:flex-end; margin-bottom:10px"><button class="secondary" id="btnPyExtract" type="button">Gửi test /extract</button></div>
+            </div>
+            <div id="pyExtractResult"></div>
+        </div>
 
-            <!-- Form Dynamic Extracted Fields -->
-            <div>
-                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Các trường thông tin đã trích xuất (JSON):</label>
-                <textarea id="jsonEditor" class="w-full h-64 p-3 bg-gray-900 text-green-400 font-mono text-xs rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Kết quả JSON sẽ hiển thị ở đây..."></textarea>
+        <div class="card">
+            <h3>Đăng nhập — lấy JWT</h3>
+            <div class="field">
+                <label>Spring Boot base URL</label>
+                <input id="springBaseUrl" value="http://localhost:8080">
             </div>
 
-            <!-- Chức năng chỉnh sửa & Lưu -->
-            <div class="flex justify-end gap-2 pt-2">
-                <button onclick="formatJson()" class="px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-xs font-semibold transition">
-                    <i class="fa-solid fa-align-left"></i> Format JSON
-                </button>
-                <button onclick="submitReview('REJECTED')" class="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1">
-                    <i class="fa-solid fa-xmark"></i> Từ chối
-                </button>
-                <button onclick="submitReview('APPROVED')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1">
-                    <i class="fa-solid fa-check"></i> Phê duyệt
-                </button>
+            <div class="toggle-row">
+                <button type="button" class="toggle-btn" id="tglAuthApi">Đăng nhập qua API</button>
+                <button type="button" class="toggle-btn active" id="tglAuthManual">Dán token có sẵn</button>
             </div>
+
+            <div id="authApiBlock" style="display:none">
+                <div class="row">
+                    <div class="field"><label>Auth path</label><input id="authPath" value="/api/v1/auth/login"></div>
+                </div>
+                <div class="field">
+                    <label>Request body (JSON) — khớp đúng LoginRequest(username, password) hiện tại</label>
+                    <textarea id="authBody" rows="3">{
+  "username": "admin",
+  "password": "admin"
+}</textarea>
+                </div>
+                <button id="btnLogin">Đăng nhập</button>
+                <p class="hint">Khớp đúng <code>AuthController</code> hiện tại: chỉ nhận <code>username</code>/<code>password</code> (hardcode test <code>admin</code>/<code>admin</code>), trả về field <code>access_token</code>. Token này có claim <code>roles: ["ADMIN","REVIEWER"]</code> và <code>companyId: 1</code> sẵn.</p>
+            </div>
+
+            <div id="authManualBlock">
+                <p class="hint" style="margin-top:0; margin-bottom:10px">Đúng quy trình bạn hay dùng ở Postman: gọi API sinh token (POST), copy chuỗi JWT trả về, dán vào ô dưới đây — console sẽ tự gắn <code>Authorization: Bearer &lt;token&gt;</code> cho mọi request tiếp theo, không khác gì chọn Bearer Token trong tab Authorization của Postman.</p>
+                <div class="field">
+                    <label>JWT token</label>
+                    <textarea id="manualToken" rows="4" placeholder="eyJhbGciOi..."></textarea>
+                </div>
+                <button id="btnUseManualToken">Dùng token này</button>
+            </div>
+
+            <div class="login-result" id="loginResult"></div>
         </div>
     </div>
-
 </div>
 
-<!-- Javascript Logic -->
+<!-- ================= MAIN APP (hidden until login) ================= -->
+<div class="app" id="appShell" style="display:none">
+
+    <div class="sidebar">
+        <div class="brand"><div class="mark"></div><h1>BizOCR</h1></div>
+        <p class="brand-sub">API Test Console</p>
+
+        <div class="nav-item active" data-tab="upload"><span class="dot"></span>Bước 1 · Upload</div>
+        <div class="nav-item" data-tab="track"><span class="dot"></span>Bước 2 · Theo dõi xử lý</div>
+        <div class="nav-item" data-tab="file"><span class="dot"></span>Bước 3 · Xem file gốc</div>
+        <div class="nav-item" data-tab="classify"><span class="dot"></span>Bước 4 · Phân loại nhanh</div>
+        <div class="nav-item" data-tab="edit"><span class="dot"></span>Bước 5 · Sửa field (audit)</div>
+        <div class="nav-item" data-tab="approve"><span class="dot"></span>Bước 6 · Duyệt</div>
+        <div class="nav-item" data-tab="export"><span class="dot"></span>Bước 7 · Xuất Excel</div>
+        <div class="nav-item" data-tab="custom"><span class="dot"></span>Request tuỳ chỉnh</div>
+
+        <div class="sidebar-foot">
+            <div class="who"><span class="k">User:</span> <span id="whoUser">—</span></div>
+            <div class="who"><span class="k">Company:</span> <span id="whoCompany">—</span></div>
+            <div class="who"><span class="k">Role:</span> <span id="whoRole">—</span></div>
+            <button class="secondary small" id="btnLogout" style="margin-top:8px; width:100%">Đăng xuất / đổi token</button>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="docid-bar">
+            <label style="margin:0">Document ID hiện tại</label>
+            <input id="globalDocId" placeholder="Sẽ tự điền sau khi Upload ở Bước 1, hoặc dán tay">
+            <button class="secondary small" id="btnCopyDocId" type="button">Copy</button>
+        </div>
+
+        <!-- BƯỚC 1: UPLOAD -->
+        <div class="tab-content" id="tab-upload">
+            <h2 class="panel-title"><span class="step-tag">1</span>Upload ảnh chứng từ</h2>
+            <p class="panel-desc">POST /api/v1/documents/upload — form-data, key <code>file</code>. Kỳ vọng: 200 OK, trả documentId, status PENDING.</p>
+
+            <div class="card">
+                <div class="drop-zone" id="dropZone">
+                    <div>Kéo thả file vào đây, hoặc <strong>bấm để chọn</strong></div>
+                    <div class="hint">Ảnh hóa đơn / PDF chứng từ</div>
+                </div>
+                <input type="file" id="fileInput" style="display:none">
+                <div id="fileChipHolder"></div>
+                <div style="margin-top:14px"><button id="btnUpload">Gửi upload</button></div>
+            </div>
+
+            <div class="card" id="uploadResultCard" style="display:none">
+                <h3>Kết quả</h3>
+                <div id="uploadResultBody"></div>
+            </div>
+        </div>
+
+        <!-- BƯỚC 2: THEO DÕI -->
+        <div class="tab-content" id="tab-track" style="display:none">
+            <h2 class="panel-title"><span class="step-tag">2</span>Theo dõi xử lý ngầm</h2>
+            <p class="panel-desc">GET /api/v1/documents/{documentId} — gọi lặp lại để theo dõi PENDING → PROCESSING → COMPLETED / NEED_REVIEW / WARNING_ANOMALY.</p>
+
+            <div class="card">
+                <div class="row">
+                    <button id="btnTrackOnce">Kiểm tra 1 lần</button>
+                    <button class="secondary" id="btnTrackPoll">Bật tự động (3s)</button>
+                </div>
+            </div>
+
+            <div class="card" id="trackResultCard" style="display:none">
+                <h3>Trạng thái hiện tại</h3>
+                <table class="kv-table" id="trackTable"></table>
+                <div class="hint" id="trackHint"></div>
+            </div>
+        </div>
+
+        <!-- BƯỚC 3: XEM FILE GỐC -->
+        <div class="tab-content" id="tab-file" style="display:none">
+            <h2 class="panel-title"><span class="step-tag">3</span>Xem file gốc</h2>
+            <p class="panel-desc">GET /api/v1/documents/{documentId}/file — trả về ảnh/PDF gốc đã upload.</p>
+
+            <div class="card">
+                <button id="btnLoadFile">Tải file gốc</button>
+            </div>
+
+            <div class="card" id="filePreviewCard" style="display:none">
+                <h3>Xem trước</h3>
+                <div id="filePreviewHolder"></div>
+            </div>
+        </div>
+
+        <!-- BƯỚC 4: PHÂN LOẠI NHANH -->
+        <div class="tab-content" id="tab-classify" style="display:none">
+            <h2 class="panel-title"><span class="step-tag">4</span>Phân loại nhanh (độc lập)</h2>
+            <p class="panel-desc">POST /api/v1/documents/classify — test riêng bước classify, không ảnh hưởng luồng chính.</p>
+
+            <div class="card">
+                <div class="field">
+                    <label>rawOcrText</label>
+                    <textarea id="classifyText" rows="5">Công ty TNHH ABC
+Mã số thuế: 0101234567
+Cộng tiền hàng: 1.500.000 đ</textarea>
+                </div>
+                <button id="btnClassify">Gửi phân loại</button>
+            </div>
+
+            <div class="card" id="classifyResultCard" style="display:none">
+                <h3>Kết quả</h3>
+                <table class="kv-table" id="classifyTable"></table>
+            </div>
+        </div>
+
+        <!-- BƯỚC 5: SỬA FIELD -->
+        <div class="tab-content" id="tab-edit" style="display:none">
+            <h2 class="panel-title"><span class="step-tag">5</span>Sửa field thủ công (audit trail)</h2>
+            <p class="panel-desc">PUT /api/v1/documents/{documentId} — extractedFields gửi dưới dạng chuỗi JSON đã escape. Sau khi gửi, kiểm tra bảng field_correction_audits trong DB.</p>
+
+            <div class="card">
+                <div class="row">
+                    <div class="field">
+                        <label>status</label>
+                        <select id="editStatus">
+                            <option value="NEED_REVIEW" selected>NEED_REVIEW</option>
+                            <option value="PENDING">PENDING</option>
+                            <option value="REJECTED">REJECTED</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>extractedFields (JSON object — console sẽ tự escape thành chuỗi khi gửi)</label>
+                    <textarea id="editFields" rows="6">{
+  "tax_code": "0101234567",
+  "total_amount": 1600000
+}</textarea>
+                </div>
+                <button id="btnSubmitEdit">Gửi cập nhật (PUT)</button>
+                <p class="hint">Chỉ 3 status này được phép qua API cập nhật chung. <code>APPROVED</code> bị chặn cứng ở đây (trả lỗi 400) — phải dùng đúng Bước 6 (POST /approve).</p>
+            </div>
+
+            <div class="card" id="editResultCard" style="display:none">
+                <h3>Kết quả</h3>
+                <div class="lbody" id="editResultBody"></div>
+            </div>
+        </div>
+
+        <!-- BƯỚC 6: DUYỆT -->
+        <div class="tab-content" id="tab-approve" style="display:none">
+            <h2 class="panel-title"><span class="step-tag">6</span>Duyệt (Approve)</h2>
+            <p class="panel-desc">POST /api/v1/documents/{documentId}/approve?approvedType=... — kỳ vọng status = APPROVED, có reviewed_by, reviewed_at.</p>
+
+            <div class="card">
+                <div class="field">
+                    <label>approvedType</label>
+                    <input id="approveType" value="VAT_INVOICE">
+                </div>
+                <button id="btnApprove">Duyệt chứng từ</button>
+            </div>
+
+            <div class="card" id="approveResultCard" style="display:none">
+                <h3>Kết quả</h3>
+                <div class="lbody" id="approveResultBody"></div>
+            </div>
+        </div>
+
+        <!-- BƯỚC 7: XUẤT EXCEL -->
+        <div class="tab-content" id="tab-export" style="display:none">
+            <h2 class="panel-title"><span class="step-tag">7</span>Xuất báo cáo Excel</h2>
+            <p class="panel-desc">GET /api/v1/documents/export — tải file .xlsx chỉ gồm chứng từ status = APPROVED thuộc companyId của token hiện tại.</p>
+
+            <div class="card">
+                <button id="btnExport">Tải file Excel</button>
+                <div id="exportResult"></div>
+            </div>
+        </div>
+
+        <!-- CUSTOM -->
+        <div class="tab-content" id="tab-custom" style="display:none">
+            <h2 class="panel-title">Request tuỳ chỉnh</h2>
+            <p class="panel-desc" style="margin-left:0">Gọi bất kỳ endpoint nào chưa cover ở trên. Token hiện tại vẫn tự động đính kèm, gửi tới Spring Boot base URL.</p>
+
+            <div class="card">
+                <div class="row">
+                    <div class="field" style="flex:0 0 110px">
+                        <label>Method</label>
+                        <select id="customMethod"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select>
+                    </div>
+                    <div class="field" style="flex:3">
+                        <label>Path (relative, VD: /api/v1/documents/123)</label>
+                        <input id="customPath" placeholder="/api/v1/...">
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Body (JSON, bỏ trống nếu GET)</label>
+                    <textarea id="customBody" rows="6" placeholder='{ "key": "value" }'></textarea>
+                </div>
+                <button id="btnCustomSend">Gửi request</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="logpanel">
+        <div class="logpanel-head">
+            <h3>Request Log</h3>
+            <button class="secondary small" id="btnClearLog">Xoá log</button>
+        </div>
+        <div class="logstream" id="logStream"><div class="empty">Chưa có request nào.</div></div>
+    </div>
+</div>
+
 <script>
-    const API_BASE = '/api/v1/documents';
-    let currentDocId = null;
+    (function() {
+        const state = { token: null, claims: null, pollTrackTimer: null };
+        const $ = (id) => document.getElementById(id);
+        const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-    // 1. Khởi chạy khi load trang
-    document.addEventListener('DOMContentLoaded', () => {
-        loadDocuments();
-    });
+        function springBase() { return $('springBaseUrl').value.replace(/\/$/, ''); }
+        function pyBase() { return $('pyBaseUrl').value.replace(/\/$/, ''); }
+        function currentDocId() { return $('globalDocId').value.trim(); }
 
-    // 2. Lấy danh sách chứng từ từ API Backend
-    async function loadDocuments() {
-        try {
-            const response = await fetch(`${API_BASE}?page=0&size=10`);
-            const data = await response.json();
+        // ---------------- LOG PANEL ----------------
+        function logRequest(method, url, status, reqBody, resBody, error) {
+            const stream = $('logStream');
+            const empty = stream.querySelector('.empty');
+            if (empty) empty.remove();
+            const entry = document.createElement('div');
+            entry.className = 'logentry';
+            const statusClass = error ? 's0' : ('s' + String(status)[0]);
+            const time = new Date().toLocaleTimeString('vi-VN');
+            let bodyHtml = '';
+            if (reqBody) bodyHtml += `<div class="lbody">→ ${escapeHtml(reqBody)}</div>`;
+            if (resBody) bodyHtml += `<div class="lbody">← ${escapeHtml(resBody)}</div>`;
+            if (error) bodyHtml += `<div class="lbody">✕ ${escapeHtml(error)}</div>`;
+            entry.innerHTML = `
+      <div class="lline"><span class="method ${method}">${method}</span><span class="lstatus ${statusClass}">${error ? 'ERR' : status}</span><span class="ltime">${time}</span></div>
+      <div class="lpath">${escapeHtml(url)}</div>${bodyHtml}`;
+            stream.prepend(entry);
+        }
+        $('btnClearLog').addEventListener('click', () => { $('logStream').innerHTML = '<div class="empty">Chưa có request nào.</div>'; });
 
-            const tbody = document.getElementById('documentTableBody');
-            tbody.innerHTML = '';
+        // ---------------- CORE FETCH (JSON) ----------------
+        async function apiFetch(baseUrl, path, { method = 'GET', body = null, isForm = false, useToken = true, headers = {} } = {}) {
+            const url = path.startsWith('http') ? path : baseUrl + path;
+            const finalHeaders = { ...headers };
+            if (useToken && state.token) finalHeaders['Authorization'] = 'Bearer ' + state.token;
+            if (!isForm && body) finalHeaders['Content-Type'] = 'application/json';
+            let reqBodyLog = null;
+            if (body) reqBodyLog = isForm ? '[multipart form-data]' : (typeof body === 'string' ? body : JSON.stringify(body));
 
-            if (data.items && data.items.length > 0) {
-                data.items.forEach(doc => {
-                    const tr = document.createElement('tr');
-                    tr.className = 'border-b hover:bg-indigo-50/50 cursor-pointer transition';
-                    tr.onclick = () => selectDocument(doc.id, doc.fileName);
+            try {
+                const res = await fetch(url, { method, headers: finalHeaders, body: body ? (isForm ? body : (typeof body === 'string' ? body : JSON.stringify(body))) : undefined });
+                const text = await res.text();
+                let json = null;
+                try { json = JSON.parse(text); } catch (e) {}
+                logRequest(method, url, res.status, reqBodyLog, text ? (json ? JSON.stringify(json, null, 2) : text) : '(empty body)');
+                return { ok: res.ok, status: res.status, data: json !== null ? json : text };
+            } catch (err) {
+                logRequest(method, url, null, reqBodyLog, null, err.message + ' — kiểm tra CORS / base URL / service có đang chạy không.');
+                return { ok: false, status: 0, data: null, error: err.message };
+            }
+        }
 
-                    tr.innerHTML = `
-                            <td class="px-4 py-3 font-semibold text-gray-900">#${doc.id}</td>
-                            <td class="px-4 py-3 font-medium text-gray-800 truncate max-w-[150px]">${doc.fileName}</td>
-                            <td class="px-4 py-3"><span class="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">${doc.documentType || 'N/A'}</span></td>
-                            <td class="px-4 py-3">${getStatusBadge(doc.status)}</td>
-                            <td class="px-4 py-3 text-right">
-                                <button class="text-indigo-600 hover:underline text-xs font-semibold">Xem</button>
-                            </td>
-                        `;
-                    tbody.appendChild(tr);
-                });
+        // ---------------- CORE FETCH (BINARY) ----------------
+        async function apiFetchBinary(baseUrl, path, { method = 'GET' } = {}) {
+            const url = path.startsWith('http') ? path : baseUrl + path;
+            const headers = {};
+            if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+            try {
+                const res = await fetch(url, { method, headers });
+                const contentType = res.headers.get('content-type') || '';
+                if (!res.ok) {
+                    const text = await res.text().catch(() => '');
+                    logRequest(method, url, res.status, null, text || '(no body)');
+                    return { ok: false, status: res.status };
+                }
+                const blob = await res.blob();
+                logRequest(method, url, res.status, null, `[binary, ${blob.size} bytes, ${contentType || 'unknown type'}]`);
+                return { ok: true, status: res.status, blob, contentType };
+            } catch (err) {
+                logRequest(method, url, null, null, null, err.message + ' — kiểm tra CORS / base URL.');
+                return { ok: false, status: 0, error: err.message };
+            }
+        }
 
-                // Tự động xem phần tử đầu tiên nếu chưa chọn
-                if (!currentDocId && data.items.length > 0) {
-                    selectDocument(data.items[0].id, data.items[0].fileName);
+        // ================= LOGIN SCREEN =================
+        $('btnOpenSwagger').addEventListener('click', () => window.open(pyBase() + '/docs', '_blank'));
+
+        $('btnPyExtract').addEventListener('click', async () => {
+            const body = { rawText: $('pyRawText').value, documentType: $('pyDocType').value };
+            const result = await apiFetch(pyBase(), '/api/v1/extract', { method: 'POST', body, useToken: false });
+            $('pyExtractResult').innerHTML = `<div class="lbody">${escapeHtml(JSON.stringify(result.data, null, 2))}</div>`;
+        });
+
+        $('tglAuthApi').addEventListener('click', () => {
+            $('tglAuthApi').classList.add('active'); $('tglAuthManual').classList.remove('active');
+            $('authApiBlock').style.display = 'block'; $('authManualBlock').style.display = 'none';
+        });
+        $('tglAuthManual').addEventListener('click', () => {
+            $('tglAuthManual').classList.add('active'); $('tglAuthApi').classList.remove('active');
+            $('authManualBlock').style.display = 'block'; $('authApiBlock').style.display = 'none';
+        });
+
+        function decodeJwtPayload(token) {
+            try {
+                const payload = token.split('.')[1];
+                const json = decodeURIComponent(atob(payload.replace(/-/g, '+').replace(/_/g, '/')).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+                return JSON.parse(json);
+            } catch (e) { return null; }
+        }
+
+        function enterApp(token) {
+            state.token = token;
+            state.claims = decodeJwtPayload(token);
+            $('whoUser').textContent = (state.claims && (state.claims.username || state.claims.sub)) || '—';
+            $('whoCompany').textContent = (state.claims && (state.claims.companyId || state.claims.company_id)) || '—';
+            $('whoRole').textContent = (state.claims && (state.claims.role || (state.claims.roles && state.claims.roles.join(',')))) || '—';
+            $('loginScreen').style.display = 'none';
+            $('appShell').style.display = 'grid';
+        }
+
+        $('btnLogin').addEventListener('click', async () => {
+            let body;
+            try { body = JSON.parse($('authBody').value); }
+            catch (e) { $('loginResult').innerHTML = `<div class="err-text">Body JSON không hợp lệ: ${escapeHtml(e.message)}</div>`; return; }
+
+            const result = await apiFetch(springBase(), $('authPath').value, { method: 'POST', body, useToken: false });
+            if (result.ok) {
+                const token = (result.data && (result.data.access_token || result.data.token || result.data.accessToken || result.data.jwt))
+                    || (typeof result.data === 'string' ? result.data : null);
+                if (token) {
+                    $('loginResult').innerHTML = `<div class="ok-text">Đăng nhập thành công. Đang mở console…</div>`;
+                    setTimeout(() => enterApp(token), 400);
+                } else {
+                    $('loginResult').innerHTML = `<div class="err-text">Login trả 200 nhưng không thấy field token/accessToken/jwt. Xem log yêu cầu ở panel bên dưới (mở tab "Dán token có sẵn" để copy thủ công).</div>`;
                 }
             } else {
-                tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-400">Chưa có chứng từ nào</td></tr>`;
+                $('loginResult').innerHTML = `<div class="err-text">Đăng nhập thất bại (status ${result.status || 'network error'}). Kiểm tra lại authPath và body cho khớp AuthController thật.</div>`;
             }
-        } catch (err) {
-            console.error('Lỗi khi tải danh sách:', err);
-        }
-    }
+        });
 
-    // 3. Chọn và hiển thị thông tin chứng từ chi tiết + xem ảnh
-    async function selectDocument(id, fileName) {
-        currentDocId = id;
-        document.getElementById('currentFileName').innerText = fileName;
+        $('btnUseManualToken').addEventListener('click', () => {
+            const t = $('manualToken').value.trim();
+            if (!t) return;
+            enterApp(t);
+        });
 
-        // Load ảnh chứng từ qua API /file
-        const imgViewer = document.getElementById('documentImageViewer');
-        const placeholder = document.getElementById('imagePlaceholder');
+        $('btnLogout').addEventListener('click', () => {
+            state.token = null; state.claims = null;
+            clearInterval(state.pollTrackTimer);
+            $('appShell').style.display = 'none';
+            $('loginScreen').style.display = 'flex';
+        });
 
-        imgViewer.src = `${API_BASE}/${id}/file`;
-        imgViewer.classList.remove('hidden');
-        placeholder.classList.add('hidden');
-
-        // Fetch chi tiết JSON
-        try {
-            const res = await fetch(`${API_BASE}/${id}`);
-            const doc = await res.json();
-
-            document.getElementById('metaDocType').innerText = doc.documentType || 'Đang phân loại...';
-            document.getElementById('metaConfidence').innerText = doc.confidenceScore ? (doc.confidenceScore * 100).toFixed(1) + '%' : 'N/A';
-            document.getElementById('docStatusBadge').innerHTML = getStatusBadge(doc.status);
-
-            // Parse và hiển thị JSON bóc tách
-            let parsedFields = {};
-            if (doc.extractedFields) {
-                try {
-                    parsedFields = JSON.parse(doc.extractedFields);
-                } catch (e) {
-                    parsedFields = { raw: doc.extractedFields };
-                }
-            }
-            document.getElementById('jsonEditor').value = JSON.stringify(parsedFields, null, 2);
-
-        } catch (err) {
-            console.error('Lỗi tải chi tiết:', err);
-        }
-    }
-
-    // 4. Upload file mới qua API
-    async function uploadFile() {
-        const fileInput = document.getElementById('fileInput');
-        if (!fileInput.files || fileInput.files.length === 0) return;
-
-        const formData = new FormData();
-        formData.append('file', fileInput.files[0]);
-
-        try {
-            const res = await fetch(`${API_BASE}/upload`, {
-                method: 'POST',
-                body: formData
+        // ================= MAIN APP NAV =================
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+                $('tab-' + item.dataset.tab).style.display = 'block';
             });
-            const result = await res.json();
+        });
 
-            alert(`Tải file lên thành công! Document ID: ${result.documentId}`);
-            fileInput.value = ''; // Reset input
+        $('btnCopyDocId').addEventListener('click', () => {
+            navigator.clipboard.writeText(currentDocId()).catch(() => {});
+        });
 
-            // Refresh lại danh sách sau 1.5 giây để chờ xử lý ngầm
-            setTimeout(loadDocuments, 1500);
-        } catch (err) {
-            alert('Tải file thất bại!');
-            console.error(err);
-        }
-    }
-
-    // Helpers
-    function getStatusBadge(status) {
-        if (status === 'COMPLETED') {
-            return `<span class="bg-emerald-100 text-emerald-800 text-xs font-semibold px-2 py-0.5 rounded">Hoàn thành</span>`;
-        } else if (status === 'PENDING') {
-            return `<span class="bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 rounded">Đang xử lý</span>`;
-        }
-        return `<span class="bg-red-100 text-red-800 text-xs font-semibold px-2 py-0.5 rounded">${status}</span>`;
-    }
-
-    function formatJson() {
-        const editor = document.getElementById('jsonEditor');
-        try {
-            const json = JSON.parse(editor.value);
-            editor.value = JSON.stringify(json, null, 2);
-        } catch (e) {
-            alert('Cú pháp JSON không hợp lệ!');
-        }
-    }
-
-    function saveChanges() {
-        alert('Thông tin đã được cập nhật thành công!');
-    }
-
-    async function submitReview(status) {
-        if (!currentDocId) {
-            alert('Vui lòng chọn chứng từ cần duyệt!');
-            return;
+        // ---------------- BƯỚC 1: UPLOAD ----------------
+        let selectedFile = null;
+        const dropZone = $('dropZone'), fileInput = $('fileInput');
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
+        dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('drag'); if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]); });
+        fileInput.addEventListener('change', () => { if (fileInput.files.length) setFile(fileInput.files[0]); });
+        function setFile(file) {
+            selectedFile = file;
+            $('fileChipHolder').innerHTML = `<div class="file-chip">📄 ${escapeHtml(file.name)} <span style="color:var(--muted)">(${(file.size/1024).toFixed(1)} KB)</span></div>`;
         }
 
-        const jsonContent = document.getElementById('jsonEditor').value;
-        try {
-            JSON.parse(jsonContent); // Validate JSON format
-        } catch (e) {
-            alert('Cú pháp JSON chưa đúng, vui lòng kiểm tra lại!');
-            return;
+        $('btnUpload').addEventListener('click', async () => {
+            if (!selectedFile) { alert('Chưa chọn file.'); return; }
+            const form = new FormData();
+            form.append('file', selectedFile);
+            const result = await apiFetch(springBase(), '/api/v1/documents/upload', { method: 'POST', body: form, isForm: true });
+            $('uploadResultCard').style.display = 'block';
+            $('uploadResultBody').innerHTML = `<div class="lbody">${escapeHtml(JSON.stringify(result.data, null, 2))}</div>`;
+            const id = result.data && (result.data.documentId || result.data.id);
+            if (id) $('globalDocId').value = id;
+        });
+
+        // ---------------- BƯỚC 2: THEO DÕI ----------------
+        async function trackOnce() {
+            const id = currentDocId();
+            if (!id) { alert('Chưa có Document ID — upload ở Bước 1 hoặc dán tay ở ô trên.'); return; }
+            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}`);
+            $('trackResultCard').style.display = 'block';
+            if (!result.ok) { $('trackTable').innerHTML = ''; $('trackHint').textContent = 'Lỗi tải trạng thái — xem log.'; return; }
+            const d = result.data || {};
+            $('trackTable').innerHTML = `
+      <tr><td>status</td><td><span class="badge ${d.status || ''}">${d.status || '—'}</span></td></tr>
+      <tr><td>documentType</td><td>${escapeHtml(d.documentType || '—')}</td></tr>
+      <tr><td>rawOcrText</td><td>${d.rawOcrText ? escapeHtml(d.rawOcrText).slice(0,200) + (d.rawOcrText.length>200?'…':'') : '—'}</td></tr>
+      <tr><td>extractedFields</td><td>${d.extractedFields ? escapeHtml(typeof d.extractedFields === 'string' ? d.extractedFields : JSON.stringify(d.extractedFields)) : '—'}</td></tr>
+    `;
+            $('trackHint').textContent = d.status === 'PROCESSING'
+                ? 'Đang xử lý — nếu kẹt lâu, xem log Spring Boot (OcrQueueConsumer/OcrClientService) và log Python (/predict, /extract).'
+                : '';
         }
+        $('btnTrackOnce').addEventListener('click', trackOnce);
+        let tracking = false;
+        $('btnTrackPoll').addEventListener('click', (e) => {
+            tracking = !tracking;
+            if (tracking) { e.target.textContent = 'Tắt tự động'; state.pollTrackTimer = setInterval(trackOnce, 3000); trackOnce(); }
+            else { e.target.textContent = 'Bật tự động (3s)'; clearInterval(state.pollTrackTimer); }
+        });
 
-        const payload = {
-            status: status,
-            extractedFields: jsonContent,
-            reviewer: "KeToanTruong_MinhTrieu"
-        };
-
-        try {
-            const res = await fetch(`${API_BASE}/${currentDocId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (res.ok) {
-                alert(`Đã cập nhật trạng thái chứng từ thành: ${status}`);
-                loadDocuments(); // Refresh lại bảng danh sách
+        // ---------------- BƯỚC 3: FILE GỐC ----------------
+        $('btnLoadFile').addEventListener('click', async () => {
+            const id = currentDocId();
+            if (!id) { alert('Chưa có Document ID.'); return; }
+            const result = await apiFetchBinary(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/file`);
+            $('filePreviewCard').style.display = 'block';
+            const holder = $('filePreviewHolder');
+            if (!result.ok) { holder.innerHTML = '<div class="empty">Không tải được file — xem log.</div>'; return; }
+            const url = URL.createObjectURL(result.blob);
+            if ((result.contentType || '').startsWith('image/')) {
+                holder.innerHTML = `<img class="preview-img" src="${url}">`;
+            } else if ((result.contentType || '').includes('pdf')) {
+                holder.innerHTML = `<iframe class="preview-frame" src="${url}"></iframe>`;
             } else {
-                alert('Có lỗi xảy ra khi lưu trạng thái!');
+                holder.innerHTML = `<a href="${url}" download="document-${id}">Tải file xuống (${result.contentType || 'không rõ loại'})</a>`;
             }
-        } catch (err) {
-            console.error('Lỗi khi cập nhật:', err);
-            alert('Kết nối máy chủ thất bại!');
-        }
-    }
+        });
+
+        // ---------------- BƯỚC 4: CLASSIFY ----------------
+        $('btnClassify').addEventListener('click', async () => {
+            const body = { rawOcrText: $('classifyText').value };
+            const result = await apiFetch(springBase(), '/api/v1/documents/classify', { method: 'POST', body });
+            $('classifyResultCard').style.display = 'block';
+            const d = result.data || {};
+            $('classifyTable').innerHTML = `
+      <tr><td>documentType</td><td>${escapeHtml(d.documentType || '—')}</td></tr>
+      <tr><td>confidenceScore</td><td>${d.confidenceScore ?? '—'}</td></tr>
+      <tr><td>matchedBy</td><td>${escapeHtml(d.matchedBy || '—')}</td></tr>
+    `;
+        });
+
+        // ---------------- BƯỚC 5: SỬA FIELD ----------------
+        $('btnSubmitEdit').addEventListener('click', async () => {
+            const id = currentDocId();
+            if (!id) { alert('Chưa có Document ID.'); return; }
+            let fieldsObj;
+            try { fieldsObj = JSON.parse($('editFields').value); }
+            catch (e) { alert('extractedFields không phải JSON hợp lệ: ' + e.message); return; }
+
+            const body = { status: $('editStatus').value, extractedFields: JSON.stringify(fieldsObj) };
+            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}`, { method: 'PUT', body });
+            $('editResultCard').style.display = 'block';
+            $('editResultBody').textContent = JSON.stringify(result.data, null, 2);
+        });
+
+        // ---------------- BƯỚC 6: APPROVE ----------------
+        $('btnApprove').addEventListener('click', async () => {
+            const id = currentDocId();
+            if (!id) { alert('Chưa có Document ID.'); return; }
+            const type = encodeURIComponent($('approveType').value.trim());
+            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/approve?approvedType=${type}`, { method: 'POST' });
+            $('approveResultCard').style.display = 'block';
+            $('approveResultBody').textContent = JSON.stringify(result.data, null, 2);
+        });
+
+        // ---------------- BƯỚC 7: EXPORT ----------------
+        $('btnExport').addEventListener('click', async () => {
+            const result = await apiFetchBinary(springBase(), '/api/v1/documents/export');
+            if (!result.ok) { $('exportResult').innerHTML = '<div class="empty">Tải thất bại — xem log.</div>'; return; }
+            const url = URL.createObjectURL(result.blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'bizocr-export.xlsx';
+            document.body.appendChild(a); a.click(); a.remove();
+            $('exportResult').innerHTML = `<div class="hint" style="margin-top:10px">Đã tải file (${(result.blob.size/1024).toFixed(1)} KB).</div>`;
+        });
+
+        // ---------------- CUSTOM ----------------
+        $('btnCustomSend').addEventListener('click', async () => {
+            const method = $('customMethod').value;
+            const path = $('customPath').value.trim();
+            if (!path) { alert('Nhập path.'); return; }
+            let body = null;
+            const raw = $('customBody').value.trim();
+            if (raw) { try { body = JSON.parse(raw); } catch (e) { alert('Body JSON không hợp lệ: ' + e.message); return; } }
+            await apiFetch(springBase(), path, { method, body });
+        });
+    })();
 </script>
 </body>
 </html>

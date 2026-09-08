@@ -14,6 +14,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.reactive.CorsConfigurationSource;
+import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 import reactor.core.publisher.Mono;
 
 import java.util.Collection;
@@ -30,10 +33,41 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * Cấu hình CORS cho môi trường dev/test.
+     * QUAN TRỌNG: liệt kê rõ origin của console/frontend test (VD: IntelliJ dev server ở
+     * localhost:63342, hoặc Vite/React dev server ở localhost:5173/3000...) thay vì dùng "*",
+     * vì khi allowCredentials(true) (bắt buộc để gửi header Authorization), Spring sẽ ném lỗi
+     * nếu allowedOrigins là "*". Trước khi lên production, thay danh sách này bằng domain thật.
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(List.of(
+                "http://localhost:63342", // IntelliJ built-in web server (console test HTML)
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://127.0.0.1:63342",
+                "http://127.0.0.1:5500" // VS Code Live Server, nếu dùng
+        ));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("*"));
+        config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
+    }
+
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
         return http
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
+                // Gắn CORS vào filter chain — thiếu dòng này thì bean corsConfigurationSource()
+                // ở trên vẫn tồn tại nhưng KHÔNG được Spring Security áp dụng, request preflight
+                // (OPTIONS) vẫn bị chặn trước khi tới controller.
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeExchange(exchanges -> exchanges
                         // 1. Endpoint công khai & Đăng nhập
                         .pathMatchers("/actuator/health", "/api/v1/public/**", "/api/v1/auth/**").permitAll()

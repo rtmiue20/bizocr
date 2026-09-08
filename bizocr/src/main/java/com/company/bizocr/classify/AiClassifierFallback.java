@@ -36,8 +36,9 @@ public class AiClassifierFallback {
                     Dựa vào nội dung OCR sau, hãy phân loại tài liệu vào
                     MỘT trong các nhóm:
 
-                    VAT_INVOICE, CONTRACT, NAME_CARD, ID_CARD,
-                    UTILITY_BILL, RECEIPT, OTHER.
+                    VAT_INVOICE, SERVICE_PAYMENT_VOUCHER, ELECTRICITY_BILL,
+                    WATER_BILL, CONTRACT, BANK_STATEMENT, ID_CARD,
+                    NAME_CARD, OTHER.
 
                     CHỈ trả về đúng một từ khóa nhóm.
                     Không giải thích, không thêm dấu câu.
