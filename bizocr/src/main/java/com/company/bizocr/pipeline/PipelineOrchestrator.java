@@ -97,7 +97,7 @@ public class PipelineOrchestrator {
 
                                                         // Nếu AI nhận diện yếu, thiếu field, HOẶC không tìm thấy công ty -> Needs Review
                                                         if (usedAiFallback || lowConfidence || fieldsIncomplete || !companyInfo.isFound()) {
-                                                            initialRecord.setStatus("NEEDS_REVIEW");
+                                                            initialRecord.setStatus("NEED_REVIEW");
                                                         } else {
                                                             initialRecord.setStatus("COMPLETED");
                                                         }
@@ -121,7 +121,11 @@ public class PipelineOrchestrator {
                             .onErrorResume(saveError -> {
                                 log.error("Không thể cập nhật trạng thái FAILED cho document ID {}", initialRecord.getId(), saveError);
                                 return Mono.just(initialRecord);
-                            });
+                            })
+                            // Đã lưu status FAILED vào DB, nhưng vẫn phải "ném" lại lỗi gốc để
+                            // OcrQueueConsumer nhận biết đây là job thất bại (log đúng, đẩy vào DLQ)
+                            // thay vì bị coi là một luồng thành công bình thường.
+                            .then(Mono.error(error));
                 });
     }
 
@@ -182,7 +186,7 @@ public class PipelineOrchestrator {
                                                                 || "{}".equals(extractedFields);
 
                                                         if (usedAiFallback || lowConfidence || fieldsIncomplete || !companyInfo.isFound()) {
-                                                            record.setStatus("NEEDS_REVIEW");
+                                                            record.setStatus("NEED_REVIEW");
                                                         } else {
                                                             record.setStatus("COMPLETED");
                                                         }
@@ -207,7 +211,11 @@ public class PipelineOrchestrator {
                             .onErrorResume(saveError -> {
                                 log.error("Không thể cập nhật trạng thái FAILED cho document ID {}", record.getId(), saveError);
                                 return Mono.just(record);
-                            });
+                            })
+                            // Đã lưu status FAILED vào DB, nhưng vẫn phải "ném" lại lỗi gốc để
+                            // OcrQueueConsumer nhận biết đây là job thất bại (log đúng, đẩy vào DLQ)
+                            // thay vì bị coi là một luồng thành công bình thường.
+                            .then(Mono.error(error));
                 });
     }
 

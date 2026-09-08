@@ -147,30 +147,6 @@
         <p class="login-sub">API Test Console — đăng nhập trước để lấy JWT, sau đó mới thao tác các bước còn lại.</p>
 
         <div class="card">
-            <h3>Bước 0 — Kiểm tra Python service (tách biệt, không cần JWT)</h3>
-            <div class="row">
-                <div class="field">
-                    <label>Python service base URL</label>
-                    <input id="pyBaseUrl" value="http://localhost:8000">
-                </div>
-                <div style="align-self:flex-end; margin-bottom:10px">
-                    <button class="secondary" id="btnOpenSwagger" type="button">Mở /docs (Swagger)</button>
-                </div>
-            </div>
-            <div class="field">
-                <label>rawText (test /api/v1/extract)</label>
-                <textarea id="pyRawText" rows="3">Công ty TNHH ABC
-Mã số thuế: 0101234567
-Cộng tiền hàng: 1.500.000 đ</textarea>
-            </div>
-            <div class="row">
-                <div class="field"><label>documentType</label><input id="pyDocType" value="VAT_INVOICE"></div>
-                <div style="align-self:flex-end; margin-bottom:10px"><button class="secondary" id="btnPyExtract" type="button">Gửi test /extract</button></div>
-            </div>
-            <div id="pyExtractResult"></div>
-        </div>
-
-        <div class="card">
             <h3>Đăng nhập — lấy JWT</h3>
             <div class="field">
                 <label>Spring Boot base URL</label>
@@ -225,6 +201,7 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
         <div class="nav-item" data-tab="edit"><span class="dot"></span>Bước 5 · Sửa field (audit)</div>
         <div class="nav-item" data-tab="approve"><span class="dot"></span>Bước 6 · Duyệt</div>
         <div class="nav-item" data-tab="export"><span class="dot"></span>Bước 7 · Xuất Excel</div>
+        <div class="nav-item" data-tab="template"><span class="dot"></span>Cấu hình Template</div>
         <div class="nav-item" data-tab="custom"><span class="dot"></span>Request tuỳ chỉnh</div>
 
         <div class="sidebar-foot">
@@ -252,7 +229,24 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
                     <div>Kéo thả file vào đây, hoặc <strong>bấm để chọn</strong></div>
                     <div class="hint">Ảnh hóa đơn / PDF chứng từ</div>
                 </div>
-                <input type="file" id="fileInput" style="display:none">
+                <input type="file" id="fileInput" accept="image/*,.pdf" style="display:none">
+
+                <div class="row" style="margin-top:10px; align-items:center">
+                    <div style="color:var(--muted); font-size:12px">— hoặc —</div>
+                    <button class="secondary" id="btnOpenCamera" type="button">📷 Chụp ảnh</button>
+                </div>
+
+                <div id="cameraBox" style="display:none; margin-top:12px">
+                    <video id="cameraVideo" autoplay playsinline muted style="width:100%; max-height:380px; background:#000; border-radius:8px; border:1px solid var(--border); display:block"></video>
+                    <div class="row" style="margin-top:10px">
+                        <button id="btnSnap" type="button">Chụp ảnh</button>
+                        <button class="secondary" id="btnSwitchCamera" type="button">Đổi camera</button>
+                        <button class="secondary" id="btnCloseCamera" type="button">Đóng camera</button>
+                    </div>
+                    <p class="hint" id="cameraHint">Đang mở camera… trình duyệt có thể hỏi cấp quyền truy cập Camera, bấm Cho phép.</p>
+                </div>
+                <canvas id="cameraCanvas" style="display:none"></canvas>
+
                 <div id="fileChipHolder"></div>
                 <div style="margin-top:14px"><button id="btnUpload">Gửi upload</button></div>
             </div>
@@ -354,12 +348,30 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
         <!-- BƯỚC 6: DUYỆT -->
         <div class="tab-content" id="tab-approve" style="display:none">
             <h2 class="panel-title"><span class="step-tag">6</span>Duyệt (Approve)</h2>
-            <p class="panel-desc">POST /api/v1/documents/{documentId}/approve?approvedType=... — kỳ vọng status = APPROVED, có reviewed_by, reviewed_at.</p>
+            <p class="panel-desc">POST /api/v1/documents/{documentId}/approve — gửi thông tin duyệt, kích hoạt tra cứu Thuế và lưu Company.</p>
 
             <div class="card">
+                <div class="row">
+                    <div class="field">
+                        <label>Loại chứng từ (documentType / approvedType)</label>
+                        <select id="approveType">
+                            <option value="CONTRACT" selected>CONTRACT (Hợp đồng / Biên bản)</option>
+                            <option value="VAT_INVOICE">VAT_INVOICE (Hóa đơn GTGT)</option>
+                            <option value="ELECTRICITY_BILL">ELECTRICITY_BILL (Hóa đơn tiền điện)</option>
+                            <option value="RECEIPT">RECEIPT (Biên nhận / Phiếu thu)</option>
+                            <option value="NAMECARD">NAMECARD (Danh thiếp)</option>
+                            <option value="STATEMENT">STATEMENT (Sao kê ngân hàng)</option>
+                            <option value="OTHER">OTHER (Khác)</option>
+                        </select>
+                    </div>
+                </div>
                 <div class="field">
-                    <label>approvedType</label>
-                    <input id="approveType" value="VAT_INVOICE">
+                    <label>Request Body (JSON) — truyền taxCode, companyName để hệ thống tra cứu Thuế</label>
+                    <textarea id="approveBody" rows="5">{
+                              "taxCode": "0101234567",
+                              "companyName": "Công ty TNHH VÍ DỤ"
+                            }
+                    </textarea>
                 </div>
                 <button id="btnApprove">Duyệt chứng từ</button>
             </div>
@@ -378,6 +390,22 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
             <div class="card">
                 <button id="btnExport">Tải file Excel</button>
                 <div id="exportResult"></div>
+            </div>
+        </div>
+
+        <!-- CẤU HÌNH TEMPLATE -->
+        <div class="tab-content" id="tab-template" style="display:none">
+            <h2 class="panel-title">Nạp lại cấu hình Template</h2>
+            <p class="panel-desc">POST /api/v1/templates/reload — Gọi API này để xóa cache và tải lại danh sách template (bao gồm Regex bóc tách) từ Database vào bộ nhớ ứng dụng.</p>
+
+            <div class="card">
+                <button id="btnReloadTemplate">Nạp lại (Reload) Cấu hình</button>
+                <p class="hint" style="margin-top:10px">Sử dụng sau khi bạn cập nhật bảng <code>template_config</code> hoặc <code>template_field_config</code> trong CSDL.</p>
+            </div>
+
+            <div class="card" id="templateResultCard" style="display:none">
+                <h3>Kết quả</h3>
+                <div class="lbody" id="templateResultBody"></div>
             </div>
         </div>
 
@@ -422,7 +450,6 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
         const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
         function springBase() { return $('springBaseUrl').value.replace(/\/$/, ''); }
-        function pyBase() { return $('pyBaseUrl').value.replace(/\/$/, ''); }
         function currentDocId() { return $('globalDocId').value.trim(); }
 
         // ---------------- LOG PANEL ----------------
@@ -490,14 +517,6 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
         }
 
         // ================= LOGIN SCREEN =================
-        $('btnOpenSwagger').addEventListener('click', () => window.open(pyBase() + '/docs', '_blank'));
-
-        $('btnPyExtract').addEventListener('click', async () => {
-            const body = { rawText: $('pyRawText').value, documentType: $('pyDocType').value };
-            const result = await apiFetch(pyBase(), '/api/v1/extract', { method: 'POST', body, useToken: false });
-            $('pyExtractResult').innerHTML = `<div class="lbody">${escapeHtml(JSON.stringify(result.data, null, 2))}</div>`;
-        });
-
         $('tglAuthApi').addEventListener('click', () => {
             $('tglAuthApi').classList.add('active'); $('tglAuthManual').classList.remove('active');
             $('authApiBlock').style.display = 'block'; $('authManualBlock').style.display = 'none';
@@ -554,6 +573,8 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
         $('btnLogout').addEventListener('click', () => {
             state.token = null; state.claims = null;
             clearInterval(state.pollTrackTimer);
+            if (typeof stopCamera === 'function') stopCamera();
+            $('cameraBox').style.display = 'none';
             $('appShell').style.display = 'none';
             $('loginScreen').style.display = 'flex';
         });
@@ -584,6 +605,63 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
             selectedFile = file;
             $('fileChipHolder').innerHTML = `<div class="file-chip">📄 ${escapeHtml(file.name)} <span style="color:var(--muted)">(${(file.size/1024).toFixed(1)} KB)</span></div>`;
         }
+
+        // ---------------- BƯỚC 1: CHỤP ẢNH TỪ CAMERA ----------------
+        const cameraBox = $('cameraBox'), cameraVideo = $('cameraVideo'), cameraCanvas = $('cameraCanvas'), cameraHint = $('cameraHint');
+        let cameraStream = null;
+        let facingMode = 'environment'; // ưu tiên camera sau (phù hợp chụp chứng từ trên điện thoại)
+
+        async function startCamera() {
+            stopCamera(); // đảm bảo không mở chồng 2 stream
+            cameraBox.style.display = 'block';
+            cameraHint.textContent = 'Đang mở camera… trình duyệt có thể hỏi cấp quyền truy cập Camera, bấm Cho phép.';
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                cameraHint.textContent = 'Trình duyệt không hỗ trợ truy cập Camera, hoặc trang không chạy ở ngữ cảnh an toàn (cần https:// hoặc http://localhost).';
+                return;
+            }
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: facingMode } },
+                    audio: false
+                });
+                cameraVideo.srcObject = cameraStream;
+                cameraHint.textContent = 'Canh chứng từ vào giữa khung hình rồi bấm "Chụp ảnh".';
+            } catch (err) {
+                cameraHint.textContent = 'Không mở được camera: ' + err.message + ' — kiểm tra quyền Camera của trình duyệt / hệ điều hành.';
+            }
+        }
+
+        function stopCamera() {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+            }
+            cameraVideo.srcObject = null;
+        }
+
+        $('btnOpenCamera').addEventListener('click', startCamera);
+        $('btnCloseCamera').addEventListener('click', () => { stopCamera(); cameraBox.style.display = 'none'; });
+        $('btnSwitchCamera').addEventListener('click', () => {
+            facingMode = (facingMode === 'environment') ? 'user' : 'environment';
+            startCamera();
+        });
+
+        $('btnSnap').addEventListener('click', () => {
+            if (!cameraStream) { cameraHint.textContent = 'Camera chưa sẵn sàng.'; return; }
+            const w = cameraVideo.videoWidth, h = cameraVideo.videoHeight;
+            if (!w || !h) { cameraHint.textContent = 'Camera chưa có khung hình, thử lại sau 1 giây.'; return; }
+            cameraCanvas.width = w;
+            cameraCanvas.height = h;
+            cameraCanvas.getContext('2d').drawImage(cameraVideo, 0, 0, w, h);
+            cameraCanvas.toBlob((blob) => {
+                if (!blob) { cameraHint.textContent = 'Chụp ảnh thất bại, thử lại.'; return; }
+                const fileName = `camera-capture-${Date.now()}.jpg`;
+                const file = new File([blob], fileName, { type: 'image/jpeg' });
+                setFile(file);
+                stopCamera();
+                cameraBox.style.display = 'none';
+            }, 'image/jpeg', 0.92);
+        });
 
         $('btnUpload').addEventListener('click', async () => {
             if (!selectedFile) { alert('Chưa chọn file.'); return; }
@@ -671,8 +749,23 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
         $('btnApprove').addEventListener('click', async () => {
             const id = currentDocId();
             if (!id) { alert('Chưa có Document ID.'); return; }
-            const type = encodeURIComponent($('approveType').value.trim());
-            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/approve?approvedType=${type}`, { method: 'POST' });
+
+            let body = {};
+            const rawBody = $('approveBody').value.trim();
+            if (rawBody) {
+                try { body = JSON.parse(rawBody); }
+                catch (e) { alert('Body JSON không hợp lệ: ' + e.message); return; }
+            }
+
+            const type = $('approveType').value.trim();
+            body.approvedType = type;
+            body.documentType = type;
+
+            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/approve`, {
+                method: 'POST',
+                body: body
+            });
+
             $('approveResultCard').style.display = 'block';
             $('approveResultBody').textContent = JSON.stringify(result.data, null, 2);
         });
@@ -686,6 +779,13 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
             a.href = url; a.download = 'bizocr-export.xlsx';
             document.body.appendChild(a); a.click(); a.remove();
             $('exportResult').innerHTML = `<div class="hint" style="margin-top:10px">Đã tải file (${(result.blob.size/1024).toFixed(1)} KB).</div>`;
+        });
+
+        // ---------------- TEMPLATE RELOAD ----------------
+        $('btnReloadTemplate').addEventListener('click', async () => {
+            const result = await apiFetch(springBase(), '/api/v1/templates/reload', { method: 'POST' });
+            $('templateResultCard').style.display = 'block';
+            $('templateResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
         });
 
         // ---------------- CUSTOM ----------------

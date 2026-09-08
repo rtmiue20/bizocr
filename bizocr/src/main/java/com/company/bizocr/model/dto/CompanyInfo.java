@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 public class CompanyInfo {
 
     private Long companyId;
+    private String legalName;
     private String companyCode;
     private String taxCode;
     private String companyName;

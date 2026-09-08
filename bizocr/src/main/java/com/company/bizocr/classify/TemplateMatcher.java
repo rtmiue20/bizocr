@@ -407,4 +407,14 @@ public class TemplateMatcher {
         normalized = normalized.replaceAll("\\p{M}", "");
         return normalized;
     }
+
+    /**
+     * Dọn dẹp toàn bộ các mẫu chứng từ động nạp từ DB (giữ nguyên các mẫu hardcode cốt lõi)
+     */
+    public void clearDynamicTemplates() {
+        templateCatalog.entrySet().removeIf(entry ->
+                "DYNAMIC_DB".equalsIgnoreCase(entry.getValue().getCategory())
+        );
+        log.info("[TemplateMatcher] Đã dọn dẹp toàn bộ template động từ bộ nhớ");
+    }
 }

@@ -2,6 +2,8 @@ package com.company.bizocr.controller;
 
 import com.company.bizocr.classify.ClassifierService;
 import com.company.bizocr.model.dto.ClassifyResult;
+import com.company.bizocr.model.dto.request.DocumentApproveRequest;
+import com.company.bizocr.model.dto.response.DocumentApproveResponse;
 import com.company.bizocr.service.FieldAuditService;
 import com.company.bizocr.model.dto.request.DocumentUpdateRequest;
 import com.company.bizocr.model.dto.response.DocumentPageResponse;
@@ -104,7 +106,8 @@ public class DocumentController {
         return null;
     }
 
-    // 1. API Upload tập trung (Gắn thêm companyId khi tạo mới)
+    // 1. C - Create
+    // API Upload tập trung (Gắn thêm companyId khi tạo mới)
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Mono<UploadResponse> uploadDocument(
             @RequestPart("file") FilePart filePart,
@@ -139,35 +142,36 @@ public class DocumentController {
                         .build());
     }
 
-    // 2. API Phân loại nhanh văn bản OCR
+    // API Phân loại nhanh văn bản OCR
     @PostMapping("/classify")
     public Mono<ClassifyResult> classifyDocument(@RequestBody Map<String, String> request) {
         String rawOcrText = request.get("rawOcrText");
         return classifierService.classifyDocument(rawOcrText);
     }
 
-    // 3. API Phê duyệt chứng từ (Kiểm tra quyền sở hữu công ty trước khi duyệt)
-    @PostMapping("/{id}/approve")
-    public Mono<ResponseEntity<Void>> approveDocument(
-            @PathVariable Long id,
-            @RequestParam String approvedType,
-            Mono<java.security.Principal> principalMono) {
+//    // API Phê duyệt chứng từ (Kiểm tra quyền sở hữu công ty trước khi duyệt)
+//    @PostMapping("/{id}/approve")
+//    public Mono<ResponseEntity<Void>> approveDocument(
+//            @PathVariable Long id,
+//            @RequestParam String approvedType,
+//            Mono<java.security.Principal> principalMono) {
+//
+//        return getCurrentCompanyId(principalMono)
+//                // Chặn đứng IDOR: Phải là document của đúng công ty mới cho phép duyệt
+//                .flatMap(companyId -> documentRepository.findByIdAndCompanyId(id, companyId))
+//                .switchIfEmpty(Mono.error(new ResponseStatusException(
+//                        HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hợp lệ để duyệt"
+//                )))
+//                .flatMap(doc -> principalMono.map(java.security.Principal::getName))
+//                .switchIfEmpty(Mono.error(new ResponseStatusException(
+//                        HttpStatus.UNAUTHORIZED, "Truy cập bị từ chối: Không tìm thấy thông tin xác thực"
+//                )))
+//                .flatMap(currentUser -> documentReviewService.approveDocument(id, approvedType, currentUser))
+//                .thenReturn(ResponseEntity.ok().build());
+//    }
 
-        return getCurrentCompanyId(principalMono)
-                // Chặn đứng IDOR: Phải là document của đúng công ty mới cho phép duyệt
-                .flatMap(companyId -> documentRepository.findByIdAndCompanyId(id, companyId))
-                .switchIfEmpty(Mono.error(new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hợp lệ để duyệt"
-                )))
-                .flatMap(doc -> principalMono.map(java.security.Principal::getName))
-                .switchIfEmpty(Mono.error(new ResponseStatusException(
-                        HttpStatus.UNAUTHORIZED, "Truy cập bị từ chối: Không tìm thấy thông tin xác thực"
-                )))
-                .flatMap(currentUser -> documentReviewService.approveDocument(id, approvedType, currentUser))
-                .thenReturn(ResponseEntity.ok().build());
-    }
-
-    // 4. API Lấy file vật lý để hiển thị UI (Đã bọc companyId)
+    // 2. R - Read
+    // API Lấy file vật lý để hiển thị UI (Đã bọc companyId)
     @GetMapping("/{id}/file")
     public Mono<ResponseEntity<Resource>> getDocumentFile(
             @PathVariable Long id,
@@ -191,7 +195,7 @@ public class DocumentController {
                 });
     }
 
-    // 5. API Lấy danh sách chứng từ (Đã vá lỗi Multi-tenant)
+    // API Lấy danh sách chứng từ (Đã vá lỗi Multi-tenant)
     @GetMapping
     public Mono<DocumentPageResponse> getDocuments(
             @RequestParam(required = false) String status,
@@ -226,7 +230,7 @@ public class DocumentController {
         });
     }
 
-    // 6. API Xem chi tiết 1 chứng từ (Đã vá lỗi Multi-tenant IDOR)
+    // API Xem chi tiết 1 chứng từ (Đã vá lỗi Multi-tenant IDOR)
     @GetMapping("/{id}")
     public Mono<Document> getDocumentById(
             @PathVariable Long id,
@@ -239,8 +243,22 @@ public class DocumentController {
                         "Không tìm thấy chứng từ hoặc bạn không có quyền truy cập dữ liệu của công ty khác"
                 )));
     }
+    // API Xuất báo cáo Excel (Đã cách ly dữ liệu export theo tenant)
+    @GetMapping("/export")
+    public Mono<ResponseEntity<byte[]>> exportApprovedDocuments(Mono<java.security.Principal> principalMono) {
+        return getCurrentCompanyId(principalMono)
+                .flatMap(companyId -> documentRepository.findByStatusAndCompanyId("APPROVED", companyId)
+                        .collectList()
+                        .flatMap(excelExportService::exportToExcel)
+                )
+                .map(bytes -> ResponseEntity.ok()
+                        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=bao_cao_ke_toan.xlsx")
+                        .header(HttpHeaders.CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        .body(bytes));
+    }
 
-    // 7. API Cập nhật thông tin chứng từ tổng quát (Đã tích hợp Validate JSON & Audit Diff)
+    // 3. U - Update, P - Put
+    // API Cập nhật thông tin chứng từ tổng quát (Đã tích hợp Validate JSON & Audit Diff)
     @PutMapping("/{id}")
     public Mono<Document> updateDocument(
             @PathVariable Long id,
@@ -307,19 +325,5 @@ public class DocumentController {
                             }));
                         })
                 );
-    }
-
-    // 8. API Xuất báo cáo Excel (Đã cách ly dữ liệu export theo tenant)
-    @GetMapping("/export")
-    public Mono<ResponseEntity<byte[]>> exportApprovedDocuments(Mono<java.security.Principal> principalMono) {
-        return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByStatusAndCompanyId("APPROVED", companyId)
-                        .collectList()
-                        .flatMap(excelExportService::exportToExcel)
-                )
-                .map(bytes -> ResponseEntity.ok()
-                        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=bao_cao_ke_toan.xlsx")
-                        .header(HttpHeaders.CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                        .body(bytes));
     }
 }

@@ -37,3 +37,34 @@ CREATE TABLE IF NOT EXISTS documents (
     reviewed_at VARCHAR(50),              -- Thời gian kế toán duyệt
     reviewed_by VARCHAR(100)              -- Tên/ID người duyệt
 );
+
+-- Cấu hình Template Matching động (thay cho hardcode)
+CREATE TABLE IF NOT EXISTS template_config (
+    id              BIGINT       NOT NULL AUTO_INCREMENT,
+    doc_type_code   VARCHAR(100) NOT NULL,
+    display_name    VARCHAR(255) NOT NULL,
+    anchors         TEXT         NOT NULL,   -- các từ khóa định danh, cách nhau bởi dấu phẩy
+    status          VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+    note            VARCHAR(500),
+    created_at      DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_template_config_doc_type_code (doc_type_code)
+);
+
+CREATE TABLE IF NOT EXISTS template_field_config (
+    id              BIGINT       NOT NULL AUTO_INCREMENT,
+    doc_type_code   VARCHAR(100) NOT NULL,
+    field_key       VARCHAR(100) NOT NULL,
+    ui_label        VARCHAR(255) NOT NULL,
+    data_type       VARCHAR(20)  NOT NULL,   -- TEXT / NUMBER / DATE
+    required        TINYINT(1)   NOT NULL DEFAULT 0,
+    regex_pattern   VARCHAR(1000) NOT NULL,
+    note            VARCHAR(500),
+    display_order   INT          NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    KEY idx_field_config_doc_type_code (doc_type_code),
+    CONSTRAINT fk_field_config_doc_type
+    FOREIGN KEY (doc_type_code) REFERENCES template_config (doc_type_code)
+    ON UPDATE CASCADE ON DELETE CASCADE
+);

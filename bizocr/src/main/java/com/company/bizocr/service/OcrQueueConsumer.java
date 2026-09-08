@@ -78,7 +78,16 @@ public class OcrQueueConsumer {
                 )
                 .doFinally(signal -> batchRunning.set(false))
                 .subscribe(
-                        result -> log.info("OCR job hoàn tất thành công, documentId={}", result.getId()),
+                        result -> {
+                            // Lớp phòng thủ: chỉ log "thành công" đúng nghĩa khi status thật sự
+                            // không phải FAILED — tránh log sai lệch nếu pipeline sau này lại
+                            // vô tình "nuốt" lỗi mà không propagate ra ngoài.
+                            if ("FAILED".equals(result.getStatus())) {
+                                log.warn("OCR job kết thúc với trạng thái FAILED, documentId={}", result.getId());
+                            } else {
+                                log.info("OCR job hoàn tất thành công, documentId={}, status={}", result.getId(), result.getStatus());
+                            }
+                        },
                         error -> log.error("Lỗi hệ thống trong OCR batch loop", error)
                 );
     }
