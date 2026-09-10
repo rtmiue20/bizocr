@@ -92,4 +92,10 @@ public class Document {
     @Column("reviewed_at")
     private String reviewedAt;
 
+    @Column("contact_name")
+    private String contactName;
+
+    @Column("contact_title")
+    private String contactTitle;
+
 }

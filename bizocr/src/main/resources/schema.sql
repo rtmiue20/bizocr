@@ -1,70 +1,169 @@
--- 1. Bảng lưu trữ thông tin Công ty (Company)
+-- =========================================================
+-- 1. COMPANIES — thông tin công ty + trạng thái xác thực MST
+-- =========================================================
 CREATE TABLE IF NOT EXISTS companies (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    company_code VARCHAR(100) UNIQUE,     -- Mã công ty nội bộ (VD: ABC001)
-    tax_code VARCHAR(50) UNIQUE,          -- Mã số thuế (VD: 0312345678)
-    legal_name VARCHAR(255) NOT NULL,     -- Tên pháp lý gốc
-    normalized_name VARCHAR(255),         -- Tên đã chuẩn hóa (bỏ dấu, viết hoa)
-    active BOOLEAN DEFAULT TRUE           -- Trạng thái hoạt động
-);
+    id                    BIGINT        NOT NULL AUTO_INCREMENT,
+    company_code          VARCHAR(100),                          -- Mã công ty nội bộ (VD: ABC001)
+    tax_code              VARCHAR(30),                           -- Mã số thuế (VD: 0312345678)
+    legal_name            VARCHAR(255)  NOT NULL,                 -- Tên pháp lý gốc
+    short_name            VARCHAR(255),
+    normalized_name       VARCHAR(255)  NOT NULL,                 -- Tên đã chuẩn hóa (bỏ dấu, viết hoa)
+    address               VARCHAR(500),
+    phone                 VARCHAR(50),
+    email                 VARCHAR(255),
+    website               VARCHAR(255),
+    industry              VARCHAR(255),
+    active                TINYINT(1)    NOT NULL DEFAULT 1,
+    created_at            VARCHAR(100),
+    updated_at            VARCHAR(100),
+    legal_representative  VARCHAR(255),
 
--- 2. Bảng lưu trữ tên gọi khác của Công ty (Company Alias)
+    -- Multi-Signal Identification: tách bạch dữ liệu đã đối chiếu Thuế vs. chỉ có tín hiệu OCR
+    verification_status   VARCHAR(20)   NOT NULL DEFAULT 'UNVERIFIED',   -- VERIFIED | UNVERIFIED
+    verification_source   VARCHAR(30),                                  -- VIETQR_DIRECT | DB_MATCH | WEB_SEARCH_VIETQR | OCR_ONLY
+    match_confidence      DECIMAL(4,3),                                 -- 0.000–1.000, null nếu không áp dụng
+    verified_at           TIMESTAMP     NULL DEFAULT NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_companies_company_code (company_code),
+    UNIQUE KEY uk_companies_tax_code (tax_code),
+    KEY idx_companies_normalized_name (normalized_name),
+    -- Dùng thay pg_trgm (không có trên MariaDB): fuzzy match qua MATCH...AGAINST
+    FULLTEXT KEY ft_companies_normalized_name (normalized_name)
+) ENGINE=InnoDB;
+
+-- =========================================================
+-- 2. COMPANY_ALIASES — tên gọi khác (self-learning)
+-- =========================================================
 CREATE TABLE IF NOT EXISTS company_aliases (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    company_id BIGINT NOT NULL,           -- Khóa ngoại liên kết tới companies.id
-    normalized_alias VARCHAR(255) NOT NULL, -- Tên gọi khác đã chuẩn hóa
+    id                BIGINT        NOT NULL AUTO_INCREMENT,
+    company_id        BIGINT        NOT NULL,
+    alias_name        VARCHAR(255)  NOT NULL,
+    normalized_alias  VARCHAR(255)  NOT NULL,
+    source            VARCHAR(50)   NOT NULL,
+    confidence_score  DOUBLE        NOT NULL DEFAULT 1,
+    created_at        VARCHAR(100),
+
+    PRIMARY KEY (id),
+    KEY idx_company_aliases_company_id (company_id),
+    KEY idx_company_aliases_normalized_alias (normalized_alias),
     CONSTRAINT fk_company_alias FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB;
 
--- 3. Bảng lưu trữ Chứng từ (Documents)
+-- =========================================================
+-- 3. INDUSTRIES — danh mục ngành nghề
+-- =========================================================
+CREATE TABLE IF NOT EXISTS industries (
+    code        VARCHAR(10)   NOT NULL,       -- Mã ngành (VD: 6201)
+    name        VARCHAR(255)  NOT NULL,
+    description TEXT,
+    is_active   TINYINT(1)    DEFAULT 1,
+    created_at  TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (code)
+) ENGINE=InnoDB;
+
+-- =========================================================
+-- 4. COMPANY_INDUSTRIES — quan hệ N-N công ty <-> ngành nghề
+-- =========================================================
+CREATE TABLE IF NOT EXISTS company_industries (
+    company_id    BIGINT       NOT NULL,
+    industry_code VARCHAR(10)  NOT NULL,
+    is_main       TINYINT(1)   DEFAULT 0,
+    assigned_at   DATETIME     DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (company_id, industry_code),
+    CONSTRAINT fk_company_industries_company  FOREIGN KEY (company_id)    REFERENCES companies(id)  ON DELETE CASCADE,
+    CONSTRAINT fk_company_industries_industry FOREIGN KEY (industry_code) REFERENCES industries(code) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- =========================================================
+-- 5. DOCUMENTS — chứng từ
+-- =========================================================
 CREATE TABLE IF NOT EXISTS documents (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    file_name VARCHAR(255) NOT NULL,      -- Tên file
-    document_type VARCHAR(100),           -- Loại chứng từ (VAT_INVOICE, CONTRACT...)
-    confidence_score DOUBLE,              -- Độ tin cậy (0.0 - 1.0)
-    status VARCHAR(50) DEFAULT 'PENDING', -- PENDING, PROCESSING, COMPLETED, NEEDS_REVIEW, FAILED
-    extracted_fields JSON,                -- JSON lưu trữ dữ liệu bóc tách
-    received_at VARCHAR(50),              -- Thời gian nhận file
-    file_path VARCHAR(255),               -- Đường dẫn lưu file vật lý
+    id                   BIGINT        NOT NULL AUTO_INCREMENT,
+    file_name            VARCHAR(255)  NOT NULL,
+    document_type        VARCHAR(100),                          -- VAT_INVOICE, CONTRACT, ...
+    confidence_score     DOUBLE,                                -- 0.0 - 1.0
+    status               VARCHAR(50)   DEFAULT 'PENDING',       -- PENDING, PROCESSING, COMPLETED, NEEDS_REVIEW, FAILED
+    extracted_fields     JSON,
+    received_at          VARCHAR(50),
+    file_path            VARCHAR(255),
 
--- Các cột bổ sung phục vụ AI & Pipeline
-    raw_ocr_text LONGTEXT,                -- Văn bản thô từ OCR
-    matched_by VARCHAR(100),              -- Nhận diện bởi (TEMPLATE_MATCHING, AI_FALLBACK, v.v.)
-    used_ai_fallback BOOLEAN,             -- Cờ đánh dấu có dùng AI Ollama không
-    model_version VARCHAR(50),            -- Phiên bản model (VD: template-v1)
+    raw_ocr_text         LONGTEXT,
+    matched_by           VARCHAR(50),                           -- TEMPLATE_MATCHING, AI_FALLBACK, ...
+    used_ai_fallback     TINYINT(1)    NOT NULL DEFAULT 0,
+    model_version        VARCHAR(100),
 
--- Các cột phục vụ kiểm duyệt (Human-in-the-loop)
-    reviewed_at VARCHAR(50),              -- Thời gian kế toán duyệt
-    reviewed_by VARCHAR(100)              -- Tên/ID người duyệt
-);
+    reviewed_at          VARCHAR(50),
+    reviewed_by          VARCHAR(100),
 
--- Cấu hình Template Matching động (thay cho hardcode)
+    -- Liên kết Multi-Signal Identification tới companies
+    company_id           BIGINT,
+    company_match_score  DOUBLE,                                -- Điểm tương đồng khi match (0.0–1.0)
+    company_matched_by   VARCHAR(50),                            -- VIETQR_DIRECT | DB_MATCH | WEB_SEARCH_VIETQR | OCR_ONLY
+   
+    contact_name          VARCHAR(255),
+    contact_title         VARCHAR(255),
+
+    PRIMARY KEY (id),
+    KEY idx_documents_company_id (company_id),
+    CONSTRAINT fk_documents_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- =========================================================
+-- 6. FIELD_CORRECTION_AUDITS — audit log khi kế toán sửa field
+-- =========================================================
+CREATE TABLE IF NOT EXISTS field_correction_audits (
+    id                BIGINT        NOT NULL AUTO_INCREMENT,
+    document_id       BIGINT        NOT NULL,
+    company_id        BIGINT        NOT NULL,
+    field_name        VARCHAR(100)  NOT NULL,
+    original_value    TEXT,
+    corrected_value   TEXT,
+    reviewed_by       VARCHAR(100)  NOT NULL,
+    reviewed_at       VARCHAR(50)   NOT NULL,
+
+    PRIMARY KEY (id),
+    KEY idx_field_correction_audits_company_id (company_id),
+    CONSTRAINT fk_audit_document FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+    CONSTRAINT fk_audit_company  FOREIGN KEY (company_id)  REFERENCES companies(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- =========================================================
+-- 7. TEMPLATE_CONFIG — cấu hình loại chứng từ (động, không hardcode)
+-- =========================================================
 CREATE TABLE IF NOT EXISTS template_config (
     id              BIGINT       NOT NULL AUTO_INCREMENT,
     doc_type_code   VARCHAR(100) NOT NULL,
     display_name    VARCHAR(255) NOT NULL,
-    anchors         TEXT         NOT NULL,   -- các từ khóa định danh, cách nhau bởi dấu phẩy
+    anchors         TEXT         NOT NULL,   -- từ khóa định danh, cách nhau bởi dấu phẩy
     status          VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
     note            VARCHAR(500),
     created_at      DATETIME     DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
     PRIMARY KEY (id),
     UNIQUE KEY uk_template_config_doc_type_code (doc_type_code)
-);
+) ENGINE=InnoDB;
 
+-- =========================================================
+-- 8. TEMPLATE_FIELD_CONFIG — cấu hình field theo từng loại chứng từ
+-- =========================================================
 CREATE TABLE IF NOT EXISTS template_field_config (
-    id              BIGINT       NOT NULL AUTO_INCREMENT,
-    doc_type_code   VARCHAR(100) NOT NULL,
-    field_key       VARCHAR(100) NOT NULL,
-    ui_label        VARCHAR(255) NOT NULL,
-    data_type       VARCHAR(20)  NOT NULL,   -- TEXT / NUMBER / DATE
-    required        TINYINT(1)   NOT NULL DEFAULT 0,
+    id              BIGINT        NOT NULL AUTO_INCREMENT,
+    doc_type_code   VARCHAR(100)  NOT NULL,
+    field_key       VARCHAR(100)  NOT NULL,
+    ui_label        VARCHAR(255)  NOT NULL,
+    data_type       VARCHAR(20)   NOT NULL,   -- TEXT / NUMBER / DATE
+    required        TINYINT(1)    NOT NULL DEFAULT 0,
     regex_pattern   VARCHAR(1000) NOT NULL,
     note            VARCHAR(500),
-    display_order   INT          NOT NULL DEFAULT 0,
+    display_order   INT           NOT NULL DEFAULT 0,
+
     PRIMARY KEY (id),
     KEY idx_field_config_doc_type_code (doc_type_code),
     CONSTRAINT fk_field_config_doc_type
     FOREIGN KEY (doc_type_code) REFERENCES template_config (doc_type_code)
     ON UPDATE CASCADE ON DELETE CASCADE
-);
+) ENGINE=InnoDB;

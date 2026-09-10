@@ -1,55 +1,3 @@
-# Compose Docker
-#spring:
-#  config:
-#    import: "optional:classpath:application-secret.yml"
-#
-#  ai:
-#    ollama:
-#      base-url: ${OLLAMA_BASE_URL:http://ollama:11434}
-#      chat:
-#        model: ${OLLAMA_MODEL:qwen2.5:7b}
-#        temperature: 0.0
-#
-#  # Cấu hình R2DBC (Reactive) cho MariaDB
-#  r2dbc:
-#    url: r2dbc:mariadb://${DB_HOST:mariadb}:${DB_PORT:3306}/${DB_NAME:bizocr}
-#    username: ${DB_USERNAME:root}
-#    password: ${DB_PASSWORD}
-#    pool:
-#      initial-size: 5
-#      max-size: 20
-#
-#  # Tự động chạy file schema.sql lúc khởi động
-#  sql:
-#    init:
-#      mode: always
-#
-#  data:
-#    redis:
-#      host: ${REDIS_HOST:redis}
-#      port: ${REDIS_PORT:6379}
-#      password: ${REDIS_PASSWORD:}
-#      database: 0
-#      connect-timeout: 5000ms
-#      timeout: 5000ms
-#
-#  security:
-#    oauth2:
-#      resourceserver:
-#        jwt:
-#          # Địa chỉ Identity Provider (Keycloak / Auth0 / Key Server)
-#          issuer-uri: ${JWT_ISSUER_URI:https://auth.company.com/realms/bizocr}
-#
-#logging:
-#  level:
-#    org.springframework.r2dbc: DEBUG # Xem log câu lệnh SQL chạy ngầm
-#
-#bizocr:
-#  python-service:
-#    url: ${PYTHON_SERVICE_URL:http://extractor-service:8000}
-#  classification:
-#    ai-confidence-threshold: 0.80
-
 spring:
   config:
     import: "optional:classpath:application-secret.yml"
@@ -58,10 +6,10 @@ spring:
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat:
-        model: ${OLLAMA_MODEL:qwen2.5:7b}
+        model: ${OLLAMA_MODEL:qwen2.5:3b-instruct}
         temperature: 0.0
 
-  # Cấu hình R2DBC (Reactive) cho MariaDB — chạy local trên máy Windows
+  # R2DBC (Reactive) cho MariaDB
   r2dbc:
     url: r2dbc:mariadb://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:bizocr}
     username: ${DB_USERNAME:root}
@@ -70,6 +18,7 @@ spring:
       initial-size: 5
       max-size: 20
 
+  # Tự động chạy schema.sql lúc khởi động (CREATE TABLE IF NOT EXISTS -> an toàn khi DB đã có data)
   sql:
     init:
       mode: always
@@ -91,10 +40,42 @@ spring:
 
 logging:
   level:
-    org.springframework.r2dbc: DEBUG
+    org.springframework.r2dbc: DEBUG   # Xem log câu SQL chạy ngầm — tắt ở production
 
 bizocr:
   python-service:
     url: ${PYTHON_SERVICE_URL:http://localhost:8000}
   classification:
     ai-confidence-threshold: 0.80
+  search:
+    google:
+      api-key: ${GOOGLE_SEARCH_API_KEY:}
+      cx: ${GOOGLE_SEARCH_ENGINE_ID:}
+
+  ollama:
+    auto-manage: true      # true = Spring Boot tự kill + khởi động lại Ollama mỗi lần chạy app
+    force-cpu: true         # true = ép CPU-only (đang cần vì driver GPU lỗi CUDA). Đổi false khi driver đã sửa xong.
+    startup-timeout-seconds: 60
+
+---
+# Kích hoạt bằng: -Dspring.profiles.active=docker  (hoặc SPRING_PROFILES_ACTIVE=docker)
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+  ai:
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://ollama:11434}
+
+  r2dbc:
+    url: r2dbc:mariadb://${DB_HOST:mariadb}:${DB_PORT:3306}/${DB_NAME:bizocr}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+
+bizocr:
+  python-service:
+    url: ${PYTHON_SERVICE_URL:http://extractor-service:8000}

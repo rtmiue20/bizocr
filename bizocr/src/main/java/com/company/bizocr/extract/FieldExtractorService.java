@@ -137,7 +137,9 @@ public class FieldExtractorService {
             1. Trả về DUY NHẤT một chuỗi JSON hợp lệ, không kèm Markdown codeblock, không kèm giải thích.
             2. Với Hóa đơn VAT, trích xuất các key: tax_code, seller_name, invoice_date, total_amount, vat_amount.
             3. Với Hóa đơn Điện/Nước, trích xuất các key: customer_id, customer_name, total_amount, bill_date.
-            4. Với Hợp đồng/Chứng từ khác, trích xuất các key: party_a, party_b, contract_value, effective_date, summary.
+            4. Với Hợp đồng, trích xuất các key: party_a, party_b, contract_value, effective_date, summary.
+            5. Với NAMECARD, trích xuất các key: contact_name, contact_title, company_name, phone, email.
+            6. Với Chứng từ khác, linh hoạt trích xuất các thông tin quan trọng nhất.
             """.formatted(documentType, rawText);
 
             String response = chatClient.prompt()

@@ -1,11 +1,17 @@
 package com.company.bizocr.model.entity;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import org.springframework.data.annotation.Transient;
+import com.company.bizocr.model.dto.CompanyIndustryDetail;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
+
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -49,4 +55,17 @@ public class Company {
     private String createdAt;
     @Column("updated_at")
     private String updatedAt;
+
+
+    private String legalRepresentative;
+
+    @Transient
+    private List<CompanyIndustryDetail> industries;
+
+    private CompanyVerificationStatus verificationStatus;
+    private CompanyVerificationSource verificationSource;
+    private Double matchConfidence;      // 0.0–1.0, null nếu không áp dụng (VD: khớp trực tiếp MST)
+    private java.time.LocalDateTime verifiedAt;
+
+
 }

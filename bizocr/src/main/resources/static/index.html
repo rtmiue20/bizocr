@@ -294,14 +294,16 @@
         <!-- BƯỚC 4: PHÂN LOẠI NHANH -->
         <div class="tab-content" id="tab-classify" style="display:none">
             <h2 class="panel-title"><span class="step-tag">4</span>Phân loại nhanh (độc lập)</h2>
-            <p class="panel-desc">POST /api/v1/documents/classify — test riêng bước classify, không ảnh hưởng luồng chính.</p>
+            <p class="panel-desc">POST /api/v1/documents/classify — test riêng bước classify. rawOcrText tự tải từ Document ID hiện tại.</p>
 
             <div class="card">
-                <div class="field">
+                <div class="row" style="align-items:center">
+                    <button class="secondary small" id="btnLoadClassifyText" type="button">↻ Tải rawOcrText từ Document</button>
+                    <div class="hint" id="classifyLoadHint"></div>
+                </div>
+                <div class="field" style="margin-top:10px">
                     <label>rawOcrText</label>
-                    <textarea id="classifyText" rows="5">Công ty TNHH ABC
-Mã số thuế: 0101234567
-Cộng tiền hàng: 1.500.000 đ</textarea>
+                    <textarea id="classifyText" rows="6" placeholder="Bấm 'Tải rawOcrText từ Document' ở trên, hoặc dán tay để test độc lập"></textarea>
                 </div>
                 <button id="btnClassify">Gửi phân loại</button>
             </div>
@@ -315,14 +317,19 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
         <!-- BƯỚC 5: SỬA FIELD -->
         <div class="tab-content" id="tab-edit" style="display:none">
             <h2 class="panel-title"><span class="step-tag">5</span>Sửa field thủ công (audit trail)</h2>
-            <p class="panel-desc">PUT /api/v1/documents/{documentId} — extractedFields gửi dưới dạng chuỗi JSON đã escape. Sau khi gửi, kiểm tra bảng field_correction_audits trong DB.</p>
+            <p class="panel-desc">PUT /api/v1/documents/{documentId} — extractedFields tự tải từ Document hiện tại, bạn sửa lại giá trị sai rồi gửi.</p>
 
             <div class="card">
-                <div class="row">
+                <div class="row" style="align-items:center">
+                    <button class="secondary small" id="btnLoadEditFields" type="button">↻ Tải extractedFields từ Document</button>
+                    <div class="hint" id="editLoadHint"></div>
+                </div>
+
+                <div class="row" style="margin-top:10px">
                     <div class="field">
                         <label>status</label>
                         <select id="editStatus">
-                            <option value="NEED_REVIEW" selected>NEED_REVIEW</option>
+                            <option value="NEED_REVIEW">NEED_REVIEW</option>
                             <option value="PENDING">PENDING</option>
                             <option value="REJECTED">REJECTED</option>
                         </select>
@@ -330,10 +337,7 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
                 </div>
                 <div class="field">
                     <label>extractedFields (JSON object — console sẽ tự escape thành chuỗi khi gửi)</label>
-                    <textarea id="editFields" rows="6">{
-  "tax_code": "0101234567",
-  "total_amount": 1600000
-}</textarea>
+                    <textarea id="editFields" rows="6" placeholder="Bấm 'Tải extractedFields từ Document' ở trên"></textarea>
                 </div>
                 <button id="btnSubmitEdit">Gửi cập nhật (PUT)</button>
                 <p class="hint">Chỉ 3 status này được phép qua API cập nhật chung. <code>APPROVED</code> bị chặn cứng ở đây (trả lỗi 400) — phải dùng đúng Bước 6 (POST /approve).</p>
@@ -348,14 +352,19 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
         <!-- BƯỚC 6: DUYỆT -->
         <div class="tab-content" id="tab-approve" style="display:none">
             <h2 class="panel-title"><span class="step-tag">6</span>Duyệt (Approve)</h2>
-            <p class="panel-desc">POST /api/v1/documents/{documentId}/approve — gửi thông tin duyệt, kích hoạt tra cứu Thuế và lưu Company.</p>
+            <p class="panel-desc">POST /api/v1/documents/{documentId}/approve — taxCode/companyName/contactName/contactTitle tự gợi ý từ OCR, bạn xác nhận hoặc sửa lại trước khi duyệt.</p>
 
             <div class="card">
-                <div class="row">
+                <div class="row" style="align-items:center">
+                    <button class="secondary small" id="btnLoadApproveSuggestion" type="button">↻ Gợi ý từ OCR (taxCode/companyName/contactName)</button>
+                    <div class="hint" id="approveLoadHint"></div>
+                </div>
+
+                <div class="row" style="margin-top:10px">
                     <div class="field">
                         <label>Loại chứng từ (documentType / approvedType)</label>
                         <select id="approveType">
-                            <option value="CONTRACT" selected>CONTRACT (Hợp đồng / Biên bản)</option>
+                            <option value="CONTRACT">CONTRACT (Hợp đồng / Biên bản)</option>
                             <option value="VAT_INVOICE">VAT_INVOICE (Hóa đơn GTGT)</option>
                             <option value="ELECTRICITY_BILL">ELECTRICITY_BILL (Hóa đơn tiền điện)</option>
                             <option value="RECEIPT">RECEIPT (Biên nhận / Phiếu thu)</option>
@@ -365,19 +374,34 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
                         </select>
                     </div>
                 </div>
+
+                <div class="row">
+                    <div class="field">
+                        <label>Người liên hệ trên Namecard (contactName)</label>
+                        <input id="approveContactName" placeholder="Tự điền sau khi bấm Gợi ý từ OCR">
+                    </div>
+                    <div class="field">
+                        <label>Chức vụ (contactTitle)</label>
+                        <input id="approveContactTitle" placeholder="Tự điền sau khi bấm Gợi ý từ OCR">
+                    </div>
+                </div>
+                <p class="hint">2 trường trên chỉ áp dụng khi loại chứng từ là NAMECARD — để trống nếu không liên quan.</p>
+
                 <div class="field">
-                    <label>Request Body (JSON) — truyền taxCode, companyName để hệ thống tra cứu Thuế</label>
-                    <textarea id="approveBody" rows="5">{
-                              "taxCode": "0101234567",
-                              "companyName": "Công ty TNHH VÍ DỤ"
-                            }
-                    </textarea>
+                    <label>Request Body (JSON) — taxCode/companyName tự điền từ gợi ý OCR, kiểm tra lại trước khi duyệt</label>
+                    <textarea id="approveBody" rows="4" placeholder='Bấm "Gợi ý từ OCR" ở trên, hoặc gõ tay: {"taxCode": "...", "companyName": "..."}'></textarea>
                 </div>
                 <button id="btnApprove">Duyệt chứng từ</button>
             </div>
 
             <div class="card" id="approveResultCard" style="display:none">
-                <h3>Kết quả</h3>
+                <h3>Thông tin công ty đã xác nhận</h3>
+                <table class="kv-table" id="approveCompanyTable"></table>
+
+                <h3 style="margin-top:16px">Ngành nghề gợi ý (Search API — mức A, chưa xác thực đầy đủ)</h3>
+                <div id="approveIndustryList" class="hint">—</div>
+
+                <h3 style="margin-top:16px">Raw response</h3>
                 <div class="lbody" id="approveResultBody"></div>
             </div>
         </div>
@@ -586,8 +610,23 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
                 item.classList.add('active');
                 document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
                 $('tab-' + item.dataset.tab).style.display = 'block';
+
+                // Tự động tải dữ liệu thật từ Document ID hiện tại khi vào các bước cần liên động
+                const tab = item.dataset.tab;
+                if (!currentDocId()) return; // chưa có Document ID (chưa upload) -> để trống, không tự gọi API
+                if (tab === 'classify') loadClassifyTextFromDoc();
+                if (tab === 'edit') loadEditFieldsFromDoc();
+                if (tab === 'approve') loadApproveSuggestionFromDoc();
             });
         });
+
+        async function fetchCurrentDoc() {
+            const id = currentDocId();
+            if (!id) { alert('Chưa có Document ID. Upload ở Bước 1 trước.'); return null; }
+            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}`);
+            if (!result.ok) { alert('Không tải được Document: status ' + (result.status || 'network error')); return null; }
+            return result.data;
+        }
 
         $('btnCopyDocId').addEventListener('click', () => {
             navigator.clipboard.writeText(currentDocId()).catch(() => {});
@@ -718,57 +757,65 @@ Cộng tiền hàng: 1.500.000 đ</textarea>
             }
         });
 
-        // ---------------- BƯỚC 4: CLASSIFY ----------------
-        $('btnClassify').addEventListener('click', async () => {
-            const body = { rawOcrText: $('classifyText').value };
-            const result = await apiFetch(springBase(), '/api/v1/documents/classify', { method: 'POST', body });
-            $('classifyResultCard').style.display = 'block';
-            const d = result.data || {};
-            $('classifyTable').innerHTML = `
-      <tr><td>documentType</td><td>${escapeHtml(d.documentType || '—')}</td></tr>
-      <tr><td>confidenceScore</td><td>${d.confidenceScore ?? '—'}</td></tr>
-      <tr><td>matchedBy</td><td>${escapeHtml(d.matchedBy || '—')}</td></tr>
-    `;
-        });
+        // ---------------- BƯỚC 4: tự tải rawOcrText ----------------
+        async function loadClassifyTextFromDoc() {
+            $('classifyLoadHint').textContent = 'Đang tải...';
+            const doc = await fetchCurrentDoc();
+            if (!doc) { $('classifyLoadHint').textContent = ''; return; }
+            $('classifyText').value = doc.rawOcrText || '';
+            $('classifyLoadHint').textContent = doc.rawOcrText
+                ? `Đã tải rawOcrText của Document #${doc.id} (documentType hiện tại: ${doc.documentType || '—'})`
+                : 'Document này chưa có rawOcrText (có thể vẫn đang PENDING/PROCESSING).';
+        }
+        $('btnLoadClassifyText').addEventListener('click', loadClassifyTextFromDoc);
 
-        // ---------------- BƯỚC 5: SỬA FIELD ----------------
-        $('btnSubmitEdit').addEventListener('click', async () => {
-            const id = currentDocId();
-            if (!id) { alert('Chưa có Document ID.'); return; }
-            let fieldsObj;
-            try { fieldsObj = JSON.parse($('editFields').value); }
-            catch (e) { alert('extractedFields không phải JSON hợp lệ: ' + e.message); return; }
+// ---------------- BƯỚC 5: tự tải extractedFields ----------------
+        async function loadEditFieldsFromDoc() {
+            $('editLoadHint').textContent = 'Đang tải...';
+            const doc = await fetchCurrentDoc();
+            if (!doc) { $('editLoadHint').textContent = ''; return; }
 
-            const body = { status: $('editStatus').value, extractedFields: JSON.stringify(fieldsObj) };
-            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}`, { method: 'PUT', body });
-            $('editResultCard').style.display = 'block';
-            $('editResultBody').textContent = JSON.stringify(result.data, null, 2);
-        });
-
-        // ---------------- BƯỚC 6: APPROVE ----------------
-        $('btnApprove').addEventListener('click', async () => {
-            const id = currentDocId();
-            if (!id) { alert('Chưa có Document ID.'); return; }
-
-            let body = {};
-            const rawBody = $('approveBody').value.trim();
-            if (rawBody) {
-                try { body = JSON.parse(rawBody); }
-                catch (e) { alert('Body JSON không hợp lệ: ' + e.message); return; }
+            if (['NEED_REVIEW', 'PENDING', 'REJECTED'].includes(doc.status)) {
+                $('editStatus').value = doc.status;
             }
 
-            const type = $('approveType').value.trim();
-            body.approvedType = type;
-            body.documentType = type;
+            let pretty = '{}';
+            try {
+                const parsed = doc.extractedFields ? JSON.parse(doc.extractedFields) : {};
+                pretty = JSON.stringify(parsed, null, 2);
+            } catch (e) {
+                pretty = doc.extractedFields || '{}';
+            }
+            $('editFields').value = pretty;
+            $('editLoadHint').textContent = `Đã tải extractedFields của Document #${doc.id} (status: ${doc.status || '—'}) — sửa lại giá trị sai rồi gửi PUT.`;
+        }
+        $('btnLoadEditFields').addEventListener('click', loadEditFieldsFromDoc);
 
-            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/approve`, {
-                method: 'POST',
-                body: body
-            });
+// ---------------- BƯỚC 6: tự gợi ý taxCode/companyName/contactName ----------------
+        async function loadApproveSuggestionFromDoc() {
+            $('approveLoadHint').textContent = 'Đang tra cứu gợi ý từ OCR...';
+            const id = currentDocId();
+            if (!id) { $('approveLoadHint').textContent = ''; return; }
 
-            $('approveResultCard').style.display = 'block';
-            $('approveResultBody').textContent = JSON.stringify(result.data, null, 2);
-        });
+            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/company-suggestion`);
+            if (!result.ok) {
+                $('approveLoadHint').textContent = `Không lấy được gợi ý (status ${result.status || 'network error'}) — điền tay bên dưới.`;
+                return;
+            }
+
+            const suggestion = result.data || {};
+            $('approveBody').value = JSON.stringify({
+                taxCode: suggestion.taxCode || '',
+                companyName: suggestion.companyName || ''
+            }, null, 2);
+            $('approveContactName').value = suggestion.contactName || '';
+            $('approveContactTitle').value = suggestion.contactTitle || '';
+
+            $('approveLoadHint').textContent = (suggestion.taxCode || suggestion.companyName)
+                ? 'Đã điền gợi ý từ OCR — kiểm tra lại trước khi duyệt (đây chỉ là gợi ý, không đảm bảo chính xác 100%).'
+                : 'OCR không tìm được taxCode/companyName rõ ràng — điền tay bên dưới.';
+        }
+        $('btnLoadApproveSuggestion').addEventListener('click', loadApproveSuggestionFromDoc);
 
         // ---------------- BƯỚC 7: EXPORT ----------------
         $('btnExport').addEventListener('click', async () => {

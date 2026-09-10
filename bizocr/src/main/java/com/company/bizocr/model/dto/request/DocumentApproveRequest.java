@@ -18,4 +18,6 @@ public class DocumentApproveRequest {
     private String taxCode;             // Mã số thuế (nếu có)
     private String reviewedBy;          // User thực hiện duyệt
     private Map<String, Object> updatedFields; // JSON fields đã được human correction
+    private String contactName;
+    private String contactTitle;
 }

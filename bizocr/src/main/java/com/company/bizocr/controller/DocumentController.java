@@ -1,9 +1,9 @@
 package com.company.bizocr.controller;
 
 import com.company.bizocr.classify.ClassifierService;
+import com.company.bizocr.company.CompanyResolverService;
 import com.company.bizocr.model.dto.ClassifyResult;
-import com.company.bizocr.model.dto.request.DocumentApproveRequest;
-import com.company.bizocr.model.dto.response.DocumentApproveResponse;
+import com.company.bizocr.model.dto.CompanySuggestion;
 import com.company.bizocr.service.FieldAuditService;
 import com.company.bizocr.model.dto.request.DocumentUpdateRequest;
 import com.company.bizocr.model.dto.response.DocumentPageResponse;
@@ -48,6 +48,7 @@ public class DocumentController {
     private final DocumentReviewService documentReviewService;
     private final FieldAuditService fieldAuditService;
     private final ObjectMapper objectMapper;
+    private final CompanyResolverService companyResolverService;
 
     // --- Helper function: Trích xuất companyId từ JWT Token hoặc Security Context ---
     private Mono<Long> getCurrentCompanyId(Mono<java.security.Principal> principalMono) {
@@ -170,6 +171,9 @@ public class DocumentController {
 //                .thenReturn(ResponseEntity.ok().build());
 //    }
 
+    // Endpoint approve đã chuyển hẳn sang DocumentApprovalController (đã có check companyId/IDOR ở đó).
+    // KHÔNG định nghĩa lại "@PostMapping({id}/approve)" ở class này, sẽ gây lỗi Ambiguous mapping khi khởi động app.
+
     // 2. R - Read
     // API Lấy file vật lý để hiển thị UI (Đã bọc companyId)
     @GetMapping("/{id}/file")
@@ -255,6 +259,19 @@ public class DocumentController {
                         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=bao_cao_ke_toan.xlsx")
                         .header(HttpHeaders.CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                         .body(bytes));
+    }
+
+    @GetMapping("/{id}/company-suggestion")
+    public Mono<CompanySuggestion> getCompanySuggestion(
+            @PathVariable Long id,
+            Mono<java.security.Principal> principalMono) {
+
+        return getCurrentCompanyId(principalMono)
+                .flatMap(companyId -> documentRepository.findByIdAndCompanyId(id, companyId))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền truy cập"
+                )))
+                .map(doc -> companyResolverService.suggestFields(doc.getRawOcrText()));
     }
 
     // 3. U - Update, P - Put

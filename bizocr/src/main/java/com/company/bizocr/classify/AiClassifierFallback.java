@@ -38,7 +38,7 @@ public class AiClassifierFallback {
 
                     VAT_INVOICE, SERVICE_PAYMENT_VOUCHER, ELECTRICITY_BILL,
                     WATER_BILL, CONTRACT, BANK_STATEMENT, ID_CARD,
-                    NAME_CARD, OTHER.
+                    NAMECARD, OTHER.
 
                     CHỈ trả về đúng một từ khóa nhóm.
                     Không giải thích, không thêm dấu câu.
