@@ -43,7 +43,7 @@ public class ClassifierService {
         // Bước 2: Không khớp Template -> Gọi mô hình Python ML nội bộ
         log.info("[Classifier] Không khớp Template tin cậy. Gửi request sang Python System ML...");
         return pythonMlClient.predictDocumentType(rawText)
-                .map(jsonNode -> {
+                .flatMap(jsonNode -> {
                     ClassifyResult mlResult = new ClassifyResult();
 
                     // Lấy dữ liệu từ JSON trả về của Python (predictedType, confidence)
@@ -55,18 +55,20 @@ public class ClassifierService {
                         mlResult.setConfidenceScore(0.0);
                     }
 
-                    // Kiểm tra độ tin cậy (Ví dụ > 0.85 là đáng tin)
-                    if (isReliable(mlResult)) {
+                    // Kiểm tra độ tin cậy
+                    if (isReliable(mlResult) && !"UNKNOWN".equalsIgnoreCase(mlResult.getDocumentType())) {
                         mlResult.setMatchedBy("ML_SYSTEM");
                         mlResult.setSuccess(true);
+                        return Mono.just(mlResult);
                     } else {
-                        mlResult.setMatchedBy("ML_SYSTEM_LOW_CONFIDENCE");
-                        mlResult.setSuccess(false);
-                        mlResult.setUseAiFallback(true); // Đánh dấu để chuyển sang Ollama
+                        log.info("[Classifier] Python ML độ tin cậy thấp hoặc chưa xác định ({}). Fallback sang Ollama local...", mlResult.getDocumentType());
+                        return callOllamaFallback(rawText);
                     }
-
-                    return mlResult;
-                });
+                })
+                .switchIfEmpty(Mono.defer(() -> {
+                    log.info("[Classifier] Python ML không khả dụng hoặc trả về rỗng. Fallback sang Ollama local...");
+                    return callOllamaFallback(rawText);
+                }));
     }
 
     private boolean isReliable(ClassifyResult result) {

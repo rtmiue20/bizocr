@@ -27,6 +27,25 @@ public class Document {
     @Column("document_type")
     private String documentType;
 
+    /**
+     * FIX: Tenant/công ty SỞ HỮU document (từ JWT lúc upload) - dùng cho MỌI kiểm tra
+     * quyền sở hữu (IDOR) ở DocumentController (findByIdAndOwnerCompanyId,
+     * findByFilterAndOwnerCompanyId, ...). KHÔNG được PipelineOrchestrator đụng vào,
+     * chỉ gán 1 lần duy nhất lúc tạo document.
+     * Trước đây dùng chung "companyId" bên dưới cho cả 2 mục đích -> PipelineOrchestrator
+     * ghi đè companyId bằng công ty OCR nhận diện, làm mất quyền sở hữu tenant, khiến mọi
+     * document sau khi xử lý xong bị 404 sai với chính người đã upload nó.
+     */
+    @Column("owner_company_id")
+    private Long ownerCompanyId;
+
+    /**
+     * Công ty được OCR/CompanyResolverService NHẬN DIỆN trong nội dung chứng từ
+     * (đối tác/khách hàng xuất hiện trên hóa đơn, hợp đồng...) - KHÔNG phải tenant sở hữu.
+     * Dùng cho Multi-Signal Identification, verification, và so sánh lịch sử giao dịch
+     * (findHistoricalAmountsAndCompanyId). Trường này được PipelineOrchestrator ghi đè
+     * bình thường mỗi lần xử lý - đúng chủ đích.
+     */
     @Column("company_id")
     private Long companyId;
 
@@ -60,6 +79,8 @@ public class Document {
      */
     @Column("raw_ocr_text")
     private String rawOcrText;
+
+    private String ocrEngine;
 
     /**
      * Nguồn tạo kết quả:
@@ -97,5 +118,7 @@ public class Document {
 
     @Column("contact_title")
     private String contactTitle;
+
+
 
 }

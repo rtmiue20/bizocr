@@ -50,6 +50,7 @@ public class PipelineOrchestrator {
                 .flatMap(ocrResult -> {
                     String rawText = ocrResult.getRawText();
                     initialRecord.setRawOcrText(rawText);
+                    initialRecord.setOcrEngine(ocrResult.getEngine());
 
                     if (rawText == null || rawText.isBlank()) {
                         return markAsFailed(initialRecord);
@@ -140,6 +141,7 @@ public class PipelineOrchestrator {
                 .flatMap(ocrResult -> {
                     String rawText = ocrResult.getRawText();
                     record.setRawOcrText(rawText);
+                    record.setOcrEngine(ocrResult.getEngine());
 
                     if (rawText == null || rawText.isBlank()) {
                         return markAsFailed(record);

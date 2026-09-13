@@ -257,7 +257,14 @@ public class TemplateMatcher {
                 ))
                 .regexPatterns(List.of(
                         Pattern.compile("(?:phone|tel|mobile|hotline)[:\\s]*[0-9+\\-\\s.()]{8,15}", Pattern.CASE_INSENSITIVE),
-                        Pattern.compile("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", Pattern.CASE_INSENSITIVE)
+                        Pattern.compile("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", Pattern.CASE_INSENSITIVE),
+                        // FIX: Số điện thoại Việt Nam KHÔNG có nhãn "phone:"/"tel:" đi kèm.
+                        // Namecard thật thường in trần số điện thoại (vd: "0912 345 678"), OCR
+                        // không giữ được nhãn hoặc namecard vốn không thiết kế có nhãn.
+                        // Nguyên nhân gốc khiến NAME_CARD từng chỉ đạt 0.60 điểm (dưới ngưỡng 0.70).
+                        Pattern.compile("\\b0[0-9]{9,10}\\b"),
+                        // FIX: Domain KHÔNG có "http(s)://" hoặc "www." đi kèm, vd: "abc.com.vn"
+                        Pattern.compile("\\b(?:www\\.)?[a-zA-Z0-9-]+\\.(?:com|net|vn|org|info)(?:\\.vn)?\\b", Pattern.CASE_INSENSITIVE)
                 ))
                 .build());
     }

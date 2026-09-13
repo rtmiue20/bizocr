@@ -724,6 +724,7 @@
             $('trackTable').innerHTML = `
       <tr><td>status</td><td><span class="badge ${d.status || ''}">${d.status || '—'}</span></td></tr>
       <tr><td>documentType</td><td>${escapeHtml(d.documentType || '—')}</td></tr>
+      <tr><td>ocrEngine</td><td>${d.ocrEngine ? `<span class="mono">${escapeHtml(d.ocrEngine)}</span>` : '—'}</td></tr>
       <tr><td>rawOcrText</td><td>${d.rawOcrText ? escapeHtml(d.rawOcrText).slice(0,200) + (d.rawOcrText.length>200?'…':'') : '—'}</td></tr>
       <tr><td>extractedFields</td><td>${d.extractedFields ? escapeHtml(typeof d.extractedFields === 'string' ? d.extractedFields : JSON.stringify(d.extractedFields)) : '—'}</td></tr>
     `;

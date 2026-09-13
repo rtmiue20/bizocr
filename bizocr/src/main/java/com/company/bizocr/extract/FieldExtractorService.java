@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.text.Normalizer;
 
 @Slf4j
 @Service
@@ -98,12 +99,25 @@ public class FieldExtractorService {
             }
 
             // Bước 2: Kiểm tra outlier hoặc yêu cầu AI Fallback
+            //
+            // FIX: TemplateMatcher luôn chuẩn hóa confidenceScore về khoảng 0.85-0.98 khi
+            // khớp thành công (xem TemplateMatcher.match()), nên điều kiện confidenceScore < 0.75
+            // KHÔNG BAO GIỜ đúng với document đã khớp Template Matching - kể cả khi regexFields
+            // hoàn toàn rỗng (vd: NAME_CARD chưa có hàm extract*Fields hardcode nào).
+            // Hậu quả cũ: các loại chứng từ như NAME_CARD luôn rơi vào nhánh "!isOutlier" bên dưới,
+            // trả về JSON rỗng "{}" mà KHÔNG BAO GIỜ gọi Ollama fallback, dù prompt Ollama đã
+            // chuẩn bị sẵn để trích contact_name/contact_title/company_name/phone/email cho NAMECARD.
+            // Thêm điều kiện: nếu không trích được field nào bằng regex/DB config thì luôn coi là
+            // outlier, bất kể confidence bao nhiêu, vì trả "{}" cho reviewer không giúp được gì.
+            boolean noFieldsExtracted = regexFields.isEmpty();
+
             boolean isOutlier = classifyResult.isOutlier()
                     || classifyResult.isUseAiFallback()
                     || "AI_FALLBACK".equalsIgnoreCase(classifyResult.getMatchedBy())
                     || "OLLAMA_LOCAL".equalsIgnoreCase(classifyResult.getMatchedBy())
                     || classifyResult.getConfidenceScore() == null
-                    || classifyResult.getConfidenceScore() < 0.75;
+                    || classifyResult.getConfidenceScore() < 0.75
+                    || noFieldsExtracted;
 
             if (!isOutlier) {
                 log.warn(
@@ -181,17 +195,19 @@ public class FieldExtractorService {
     private Map<String, Object> extractInvoiceVatFields(String text) {
         Map<String, Object> fields = new HashMap<>();
 
-        Pattern mstPattern = Pattern.compile("(?:Mã số thuế|MST|Tax code)[:\\s]*([0-9]{10}(?:-[0-9]{3})?)", Pattern.CASE_INSENSITIVE);
-        Matcher mstMatcher = mstPattern.matcher(text);
-        if (mstMatcher.find()) {
-            // Đã SỬA: Ghi vào Map bằng key tax_code
-            fields.put("tax_code", mstMatcher.group(1));
+        // FIX: regex chỉ liệt kê nhãn CÓ DẤU trước đây sẽ không khớp được với OCR text không dấu
+        // (rất phổ biến, xem test "...thực tế từ OCR scan" trong TemplateMatcherTest.java).
+        // Giờ so khớp trên bản đã bỏ dấu (stripAccents), pattern chỉ cần viết 1 dạng không dấu.
+        Pattern mstPattern = Pattern.compile("(?:Ma so thue|MST|Tax code)[:\\s]*([0-9]{10}(?:-[0-9]{3})?)", Pattern.CASE_INSENSITIVE);
+        String mst = captureGroupFromOriginal(mstPattern, text);
+        if (mst != null) {
+            fields.put("tax_code", mst);
         }
 
-        Pattern amountPattern = Pattern.compile("(?:Tổng cộng tiền thanh toán|Cộng tiền hàng|Tổng tiền|Thành tiền)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
-        Matcher amountMatcher = amountPattern.matcher(text);
-        if (amountMatcher.find()) {
-            fields.put("total_amount", parseAmount(amountMatcher.group(1)));
+        Pattern amountPattern = Pattern.compile("(?:Tong cong tien thanh toan|Cong tien hang|Tong tien|Thanh tien)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
+        String amountRaw = captureGroupFromOriginal(amountPattern, text);
+        if (amountRaw != null) {
+            fields.put("total_amount", parseAmount(amountRaw));
         }
 
         return fields;
@@ -200,15 +216,15 @@ public class FieldExtractorService {
     // 2. Regex bóc tách Hóa đơn Điện
     private Map<String, Object> extractElectricityFields(String text) {
         Map<String, Object> fields = new HashMap<>();
-        Pattern custPattern = Pattern.compile("(?:Thẻ khách hàng|Mã KH|Mã khách hàng)[:\\s]*([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
-        Matcher custMatcher = custPattern.matcher(text);
-        if (custMatcher.find()) {
-            fields.put("customer_id", custMatcher.group(1));
+        Pattern custPattern = Pattern.compile("(?:The khach hang|Ma KH|Ma khach hang)[:\\s]*([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
+        String cust = captureGroupFromOriginal(custPattern, text);
+        if (cust != null) {
+            fields.put("customer_id", cust);
         }
-        Pattern amountPattern = Pattern.compile("(?:Tổng cộng tiền thanh toán|Tổng tiền điện thanh toán|Tổng tiền thanh toán|Tiền điện|Tổng tiền|Thành tiền)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
-        Matcher amountMatcher = amountPattern.matcher(text);
-        if (amountMatcher.find()) {
-            fields.put("total_amount", parseAmount(amountMatcher.group(1)));
+        Pattern amountPattern = Pattern.compile("(?:Tong cong tien thanh toan|Tong tien dien thanh toan|Tong tien thanh toan|Tien dien|Tong tien|Thanh tien)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
+        String amountRaw = captureGroupFromOriginal(amountPattern, text);
+        if (amountRaw != null) {
+            fields.put("total_amount", parseAmount(amountRaw));
         }
         return fields;
     }
@@ -216,15 +232,15 @@ public class FieldExtractorService {
     // 3. Regex bóc tách Hóa đơn Nước
     private Map<String, Object> extractWaterFields(String text) {
         Map<String, Object> fields = new HashMap<>();
-        Pattern dbPattern = Pattern.compile("(?:Mã danh bộ|Số danh bộ|Mã KH|Mã khách hàng)[:\\s]*([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
-        Matcher dbMatcher = dbPattern.matcher(text);
-        if (dbMatcher.find()) {
-            fields.put("customer_id", dbMatcher.group(1));
+        Pattern dbPattern = Pattern.compile("(?:Ma danh bo|So danh bo|Ma KH|Ma khach hang)[:\\s]*([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
+        String db = captureGroupFromOriginal(dbPattern, text);
+        if (db != null) {
+            fields.put("customer_id", db);
         }
-        Pattern amountPattern = Pattern.compile("(?:Tổng tiền thanh toán|Cộng tiền hàng|Tiền nước|Tổng tiền|Thành tiền)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
-        Matcher amountMatcher = amountPattern.matcher(text);
-        if (amountMatcher.find()) {
-            fields.put("total_amount", parseAmount(amountMatcher.group(1)));
+        Pattern amountPattern = Pattern.compile("(?:Tong tien thanh toan|Cong tien hang|Tien nuoc|Tong tien|Thanh tien)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
+        String amountRaw = captureGroupFromOriginal(amountPattern, text);
+        if (amountRaw != null) {
+            fields.put("total_amount", parseAmount(amountRaw));
         }
         return fields;
     }
@@ -234,21 +250,25 @@ public class FieldExtractorService {
         Map<String, Object> fields = new HashMap<>();
 
         // Tìm tên dịch vụ / đơn vị từ dòng đầu tiên hoặc từ khóa
+        // FIX: kiểm tra loại trừ cũng chạy trên bản đã bỏ dấu, tránh nhầm dòng "Phieu thanh toan"
+        // (không dấu) thành tên dịch vụ vì không khớp được với "phiếu thanh toán" (có dấu).
         String[] lines = text.split("\\r?\\n");
         for (String line : lines) {
             String trimmed = line.trim();
-            if (!trimmed.isEmpty() && !trimmed.toLowerCase().contains("phiếu thanh toán")
-                    && !trimmed.toLowerCase().contains("tổng chi phí")
-                    && !trimmed.toLowerCase().contains("thành tiền")) {
+            String trimmedUnaccented = stripAccents(trimmed).toLowerCase();
+            if (!trimmed.isEmpty()
+                    && !trimmedUnaccented.contains("phieu thanh toan")
+                    && !trimmedUnaccented.contains("tong chi phi")
+                    && !trimmedUnaccented.contains("thanh tien")) {
                 fields.put("service_name", trimmed);
                 break;
             }
         }
 
-        Pattern amountPattern = Pattern.compile("(?:Tổng chi phí|Tổng cộng tiền thanh toán|Tổng tiền thanh toán|Tổng tiền|Thành tiền|Tổng cộng)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
-        Matcher amountMatcher = amountPattern.matcher(text);
-        if (amountMatcher.find()) {
-            fields.put("total_amount", parseAmount(amountMatcher.group(1)));
+        Pattern amountPattern = Pattern.compile("(?:Tong chi phi|Tong cong tien thanh toan|Tong tien thanh toan|Tong tien|Thanh tien|Tong cong)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
+        String amountRaw = captureGroupFromOriginal(amountPattern, text);
+        if (amountRaw != null) {
+            fields.put("total_amount", parseAmount(amountRaw));
         }
 
         return fields;
@@ -258,25 +278,69 @@ public class FieldExtractorService {
     private Map<String, Object> extractContractFields(String text) {
         Map<String, Object> fields = new HashMap<>();
 
-        Pattern partyAPattern = Pattern.compile("(?:Bên A|Ben A)[:\\s]*([^\\n]+)", Pattern.CASE_INSENSITIVE);
-        Matcher partyAMatcher = partyAPattern.matcher(text);
-        if (partyAMatcher.find()) {
-            fields.put("party_a", partyAMatcher.group(1).trim());
+        Pattern partyAPattern = Pattern.compile("(?:Ben A)[:\\s]*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+        String partyA = captureGroupFromOriginal(partyAPattern, text);
+        if (partyA != null) {
+            fields.put("party_a", partyA.trim());
         }
 
-        Pattern partyBPattern = Pattern.compile("(?:Bên B|Ben B)[:\\s]*([^\\n]+)", Pattern.CASE_INSENSITIVE);
-        Matcher partyBMatcher = partyBPattern.matcher(text);
-        if (partyBMatcher.find()) {
-            fields.put("party_b", partyBMatcher.group(1).trim());
+        Pattern partyBPattern = Pattern.compile("(?:Ben B)[:\\s]*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+        String partyB = captureGroupFromOriginal(partyBPattern, text);
+        if (partyB != null) {
+            fields.put("party_b", partyB.trim());
         }
 
-        Pattern amountPattern = Pattern.compile("(?:Giá trị quyết toán|Giá trị hợp đồng|Tổng cộng|Tổng tiền)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
-        Matcher amountMatcher = amountPattern.matcher(text);
-        if (amountMatcher.find()) {
-            fields.put("total_amount", parseAmount(amountMatcher.group(1)));
+        Pattern amountPattern = Pattern.compile("(?:Gia tri quyet toan|Gia tri hop dong|Tong cong|Tong tien)[:\\s]*([0-9\\.,]+)", Pattern.CASE_INSENSITIVE);
+        String amountRaw = captureGroupFromOriginal(amountPattern, text);
+        if (amountRaw != null) {
+            fields.put("total_amount", parseAmount(amountRaw));
         }
 
         return fields;
+    }
+
+    // ==========================================================================
+    // Tiện ích bỏ dấu tiếng Việt cho việc so khớp regex (không ảnh hưởng dữ liệu lưu DB)
+    // ==========================================================================
+
+    /**
+     * Bỏ dấu tiếng Việt (NFD + xóa combining marks + xử lý riêng đ/Đ vì Unicode NFD
+     * không phân rã 2 ký tự này thành base + dấu như các nguyên âm có dấu khác).
+     */
+    private static String stripAccents(String input) {
+        if (input == null) {
+            return "";
+        }
+        String normalized = Normalizer.normalize(input, Normalizer.Form.NFD);
+        String noMarks = normalized.replaceAll("\\p{Mn}+", "");
+        return noMarks.replace('đ', 'd').replace('Đ', 'D');
+    }
+
+    /**
+     * So khớp pattern (viết KHÔNG DẤU) trên bản text đã bỏ dấu, sau đó lấy lại đúng đoạn
+     * text GỐC (còn dấu) theo vị trí match — để không làm mất dấu tên công ty/nội dung khi lưu DB.
+     * Độ dài chuỗi trước/sau khi bỏ dấu luôn bằng nhau với text tiếng Việt (mỗi ký tự có dấu
+     * phân rã NFD thành đúng 1 base char + 1 combining mark bị xóa), nên vị trí match luôn khớp
+     * 1-1 giữa 2 bản. Có fallback an toàn nếu lệch vị trí (hiếm khi xảy ra).
+     */
+    private static String captureGroupFromOriginal(Pattern unaccentedPattern, String originalText) {
+        if (originalText == null) {
+            return null;
+        }
+        String stripped = stripAccents(originalText);
+        Matcher m = unaccentedPattern.matcher(stripped);
+        if (!m.find()) {
+            return null;
+        }
+        if (m.groupCount() < 1) {
+            return m.group();
+        }
+        int start = m.start(1);
+        int end = m.end(1);
+        if (start < 0 || end > originalText.length() || start > end) {
+            return m.group(1); // fallback: lấy từ bản đã bỏ dấu nếu vị trí lệch
+        }
+        return originalText.substring(start, end);
     }
 
     // 6. Bóc tách theo cấu hình động từ DB (template_field_config, nạp từ Excel)

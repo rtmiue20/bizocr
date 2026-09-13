@@ -39,16 +39,21 @@ public class SecurityConfig {
      * localhost:63342, hoặc Vite/React dev server ở localhost:5173/3000...) thay vì dùng "*",
      * vì khi allowCredentials(true) (bắt buộc để gửi header Authorization), Spring sẽ ném lỗi
      * nếu allowedOrigins là "*". Trước khi lên production, thay danh sách này bằng domain thật.
+     *
+     * FIX: IntelliJ built-in web server KHÔNG cố định cổng 63342 — nếu cổng đó đang bị chiếm bởi
+     * project/instance khác đang mở, IntelliJ tự tăng lên 63343, 63344... Liệt kê cứng từng cổng
+     * (setAllowedOrigins) sẽ liên tục bị lệch mỗi khi IntelliJ đổi cổng. Chuyển sang
+     * setAllowedOriginPatterns với wildcard "*" cho phần cổng — vẫn chỉ giới hạn ở localhost/127.0.0.1
+     * (không mở cho origin ngoài máy dev), nhưng không còn phụ thuộc đúng 1 con số cổng cụ thể.
+     * setAllowedOriginPatterns (khác setAllowedOrigins) hỗ trợ wildcard và vẫn tương thích
+     * allowCredentials(true).
      */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(
-                "http://localhost:63342", // IntelliJ built-in web server (console test HTML)
-                "http://localhost:3000",
-                "http://localhost:5173",
-                "http://127.0.0.1:63342",
-                "http://127.0.0.1:5500" // VS Code Live Server, nếu dùng
+        config.setAllowedOriginPatterns(List.of(
+                "http://localhost:*",   // IntelliJ built-in web server, Vite, React dev server... cổng bất kỳ
+                "http://127.0.0.1:*"
         ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));

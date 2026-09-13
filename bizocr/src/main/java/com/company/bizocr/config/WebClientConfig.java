@@ -9,7 +9,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 @Configuration
 public class WebClientConfig {
 
-    @Value("${ocr.service.url:http://localhost:8000}")
+    @Value("${bizocr.python-service.url:${ocr.service.url:http://localhost:8000}}")
     private String ocrServiceUrl;
 
     @Bean

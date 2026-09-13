@@ -18,7 +18,7 @@ public class PythonMlClient {
 
     // Khởi tạo WebClient trỏ tới cổng 8000 của Python
     public PythonMlClient(WebClient.Builder webClientBuilder,
-                          @Value("${python.ml.url:http://localhost:8000}") String mlUrl) {
+                          @Value("${bizocr.python-service.url:${python.ml.url:http://localhost:8000}}") String mlUrl) {
         this.webClient = webClientBuilder.baseUrl(mlUrl).build();
     }
 

@@ -13,8 +13,17 @@ import java.util.List;
 @AllArgsConstructor
 public class OcrResult {
     private String rawText;
+    private String rawOcrText;
     private Double confidence;
     private List<BoundingBox> boxes;
+    private Boolean normalized;
+
+    /**
+     * Tên engine OCR đã xử lý document này (vd: "paddleocr").
+     * Dùng cho audit/debug khi so sánh chất lượng giữa các engine trong quá trình chuyển đổi,
+     * và để truy vết nhanh nếu một document cụ thể cho kết quả bất thường.
+     */
+    private String engine;
 
     @Data
     @NoArgsConstructor

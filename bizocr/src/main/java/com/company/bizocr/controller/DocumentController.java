@@ -121,7 +121,10 @@ public class DocumentController {
                                     .fileName(filePart.filename())
                                     .filePath(savedFilePath)
                                     .status("PENDING")
-                                    .companyId(companyId) // Gán companyId ngay từ lúc tạo file
+                                    .ownerCompanyId(companyId) // FIX: dùng cột riêng cho tenant sở hữu, KHÔNG dùng companyId
+                                    // (companyId sẽ bị PipelineOrchestrator ghi đè bằng công ty OCR nhận diện trong
+                                    // nội dung chứng từ - dùng companyId ở đây sẽ làm mất quyền sở hữu tenant sau khi
+                                    // pipeline chạy xong, khiến mọi findByIdAndOwnerCompanyId() sau đó 404 sai)
                                     .receivedAt(LocalDateTime.now().toString())
                                     .build();
 
@@ -159,7 +162,7 @@ public class DocumentController {
 //
 //        return getCurrentCompanyId(principalMono)
 //                // Chặn đứng IDOR: Phải là document của đúng công ty mới cho phép duyệt
-//                .flatMap(companyId -> documentRepository.findByIdAndCompanyId(id, companyId))
+//                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(id, companyId))
 //                .switchIfEmpty(Mono.error(new ResponseStatusException(
 //                        HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hợp lệ để duyệt"
 //                )))
@@ -182,7 +185,7 @@ public class DocumentController {
             Mono<java.security.Principal> principalMono) {
 
         return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByIdAndCompanyId(id, companyId))
+                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(id, companyId))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền truy cập"
                 )))
@@ -212,10 +215,10 @@ public class DocumentController {
 
         return getCurrentCompanyId(principalMono).flatMap(companyId -> {
             Mono<List<Document>> itemsMono = documentRepository
-                    .findByFilterAndCompanyId(status, documentType, companyId, size, offset)
+                    .findByFilterAndOwnerCompanyId(status, documentType, companyId, size, offset)
                     .collectList();
             Mono<Long> totalMono = documentRepository
-                    .countByFilterAndCompanyId(status, documentType, companyId);
+                    .countByFilterAndOwnerCompanyId(status, documentType, companyId);
 
             return Mono.zip(itemsMono, totalMono)
                     .map(tuple -> {
@@ -241,7 +244,7 @@ public class DocumentController {
             Mono<java.security.Principal> principalMono) {
 
         return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByIdAndCompanyId(id, companyId))
+                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(id, companyId))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
                         "Không tìm thấy chứng từ hoặc bạn không có quyền truy cập dữ liệu của công ty khác"
@@ -251,7 +254,7 @@ public class DocumentController {
     @GetMapping("/export")
     public Mono<ResponseEntity<byte[]>> exportApprovedDocuments(Mono<java.security.Principal> principalMono) {
         return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByStatusAndCompanyId("APPROVED", companyId)
+                .flatMap(companyId -> documentRepository.findByStatusAndOwnerCompanyId("APPROVED", companyId)
                         .collectList()
                         .flatMap(excelExportService::exportToExcel)
                 )
@@ -267,7 +270,7 @@ public class DocumentController {
             Mono<java.security.Principal> principalMono) {
 
         return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByIdAndCompanyId(id, companyId))
+                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(id, companyId))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền truy cập"
                 )))
@@ -315,7 +318,7 @@ public class DocumentController {
 
         // 3. Cập nhật và ghi Audit Vết sửa đổi
         return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByIdAndCompanyId(id, companyId))
+                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(id, companyId))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền cập nhật"
                 )))
