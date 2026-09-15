@@ -1,23 +1,26 @@
 package com.company.bizocr.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 @Component
-@RequiredArgsConstructor
 public class VietQrClient {
 
-    private final WebClient vietQrWebClient;
+    private final WebClient webClient;
+
+    public VietQrClient(@Qualifier("externalWebClient") WebClient webClient) {
+        this.webClient = webClient;
+    }
 
     public Mono<JsonNode> lookupByTaxCode(String taxCode) {
         if (taxCode == null || taxCode.isBlank()) {
             return Mono.empty();
         }
 
-        return vietQrWebClient.get()
+        return webClient.get()
                 .uri("/v2/business/{taxCode}", taxCode)
                 .retrieve()
                 .bodyToMono(JsonNode.class)

@@ -16,6 +16,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -24,10 +26,9 @@ import java.util.regex.Pattern;
 1. Tìm Mã số thuế trong text -> khớp DB theo taxCode
 2. Tìm Mã công ty trong text -> khớp DB theo companyCode
 3. Chuẩn hóa tên công ty -> khớp normalized_name / alias trong DB
-4. Không có trong DB nội bộ -> Fallback: TaxApiClient (nếu OCR có MST) -> ExternalTaxSearchService -> TaxApiClient
+4. Không có trong DB nội bộ -> Fallback: Dùng TaxApiClient (nếu có MST) -> Nếu không có MST, gọi External (Google Search) lấy MST -> Gọi TaxApiClient
 5. Vẫn không tra được MST -> tạo Company UNVERIFIED để tự học + hiển thị gợi ý người duyệt
-6. Không đủ tín hiệu gì cả -> NEEDS_REVIEW, không tạo gì
- */
+*/
 
 @Slf4j
 @Service
@@ -42,26 +43,14 @@ public class CompanyResolverService {
 
     private static final Pattern TAX_CODE_PATTERN =
             Pattern.compile(
-                    "(?i)(?:MÃ\\s*SỐ\\s*THUẾ"
-                            + "|MA\\s*SO\\s*THUE"
-                            + "|MST"
-                            + "|TAX\\s*CODE)"
-                            + "\\s*[:\\-]?\\s*"
-                            + "([0-9]{10}(?:\\s*[-/]\\s*[0-9]{3})?)"
+                    "(?i)(?:MÃ\\s*SỐ\\s*THUẾ|MA\\s*SO\\s*THUE|MST|TAX\\s*CODE)\\s*[:\\-]?\\s*([0-9]{10}(?:\\s*[-/]\\s*[0-9]{3})?)"
             );
 
     private static final Pattern COMPANY_CODE_PATTERN =
             Pattern.compile(
-                    "(?i)(?:MÃ\\s*CÔNG\\s*TY"
-                            + "|MA\\s*CONG\\s*TY"
-                            + "|MÃ\\s*ĐƠN\\s*VỊ"
-                            + "|MA\\s*DON\\s*VI"
-                            + "|COMPANY\\s*CODE)"
-                            + "\\s*[:\\-]?\\s*"
-                            + "([A-Z0-9\\-_/]+)"
+                    "(?i)(?:MÃ\\s*CÔNG\\s*TY|MA\\s*CONG\\s*TY|MÃ\\s*ĐƠN\\s*VỊ|MA\\s*DON\\s*VI|COMPANY\\s*CODE)\\s*[:\\-]?\\s*([A-Z0-9\\-_/]+)"
             );
 
-    // Regex nhận diện chức danh người liên hệ trên namecard
     private static final Pattern TITLE_PATTERN =
             Pattern.compile(
                     "(?i)\\b(giám đốc|tổng giám đốc|ceo|trưởng phòng|quản lý|manager|director|kế toán trưởng)\\b"
@@ -112,30 +101,46 @@ public class CompanyResolverService {
                                 .filter(this::isActive)
                                 .map(company -> toCompanyInfo(company, 0.95, "ALIAS"))
                 )
-                // Không có trong DB nội bộ -> thử fallback VietQR/Search trước khi bó tay
                 .switchIfEmpty(Mono.defer(() -> resolveViaExternalSources(rawText, companyName, normalizedName)));
     }
 
     /**
-     * Fallback khi DB nội bộ (taxCode/companyCode/name/alias) đều không khớp:
-     * 1. Nếu OCR đọc được MST trực tiếp trong text -> tra VietQR -> VERIFIED
-     * 2. Nếu không có MST -> Search Google tìm MST theo tên công ty -> tra VietQR -> VERIFIED
-     * 3. Vẫn không ra MST -> tạo Company UNVERIFIED để tự học và hiển thị gợi ý người duyệt
+     * Luồng Fallback API ngoài:
+     * - Có MST từ OCR -> VietQR/TaxAPI.
+     * - Không có MST -> Dùng Google Search tìm MST -> Có MST -> VietQR/TaxAPI.
      */
     private Mono<CompanyInfo> resolveViaExternalSources(String rawText, String companyName, String normalizedName) {
         String taxCodeFromText = extractTaxCode(rawText);
 
-        Mono<TaxLookupResponse> taxLookupMono = !taxCodeFromText.isBlank()
-                ? taxApiClient.lookup(taxCodeFromText, companyName)
-                : Mono.empty();
+        if (!taxCodeFromText.isBlank()) {
+            log.info("[CompanyResolver] Gọi Tax API từ MST OCR: {}", taxCodeFromText);
+            return callTaxApiAndSave(taxCodeFromText, companyName, rawText, normalizedName, CompanyVerificationSource.VIETQR_DIRECT);
+        }
 
-        return taxLookupMono
-                .switchIfEmpty(Mono.defer(() ->
-                        externalTaxSearchService.searchTaxCodeOnline(companyName, null)
-                                .flatMap(searchedTaxCode -> taxApiClient.lookup(searchedTaxCode, companyName))
-                ))
-                .flatMap(taxLookup -> createOrUpgradeVerified(taxLookup, companyName,
-                        !taxCodeFromText.isBlank() ? CompanyVerificationSource.VIETQR_DIRECT : CompanyVerificationSource.WEB_SEARCH_VIETQR))
+        log.info("[CompanyResolver] Không có MST. Fallback tìm MST qua External Search cho: {}", companyName);
+
+        // Encode URL an toàn để tránh Network Error / Bad Request do tiếng Việt
+        String safeQuery = URLEncoder.encode("Mã số thuế " + companyName, StandardCharsets.UTF_8);
+
+        return externalTaxSearchService.searchTaxCodeOnline(safeQuery, null)
+                .onErrorResume(e -> {
+                    log.warn("[CompanyResolver] External Search bị lỗi mạng/timeout: {}", e.getMessage());
+                    return Mono.empty();
+                })
+                .flatMap(searchedTaxCode -> {
+                    log.info("[CompanyResolver] Đã tìm thấy MST qua Google Search: {}", searchedTaxCode);
+                    return callTaxApiAndSave(searchedTaxCode, companyName, rawText, normalizedName, CompanyVerificationSource.WEB_SEARCH_VIETQR);
+                })
+                .switchIfEmpty(Mono.defer(() -> createUnverified(companyName, normalizedName)));
+    }
+
+    private Mono<CompanyInfo> callTaxApiAndSave(String taxCode, String companyName, String rawAlias, String normalizedName, CompanyVerificationSource source) {
+        return taxApiClient.lookup(taxCode, companyName)
+                .onErrorResume(e -> {
+                    log.warn("[CompanyResolver] Tax API bị lỗi với MST {}: {}", taxCode, e.getMessage());
+                    return Mono.empty();
+                })
+                .flatMap(taxLookup -> createOrUpgradeVerified(taxLookup, rawAlias, source))
                 .switchIfEmpty(Mono.defer(() -> createUnverified(companyName, normalizedName)));
     }
 
@@ -162,7 +167,7 @@ public class CompanyResolverService {
     }
 
     private Mono<CompanyInfo> createUnverified(String companyName, String normalizedName) {
-        log.warn("[CompanyResolver] Không xác thực được MST qua VietQR/Search, tạo UNVERIFIED cho: {}", companyName);
+        log.warn("[CompanyResolver] Không xác thực được qua API, tạo UNVERIFIED cho: {}", companyName);
 
         Company unverified = Company.builder()
                 .legalName(companyName)
@@ -180,8 +185,7 @@ public class CompanyResolverService {
     }
 
     private Mono<Company> selfLearnAlias(Company company, String rawAlias) {
-        if (rawAlias == null || rawAlias.isBlank()
-                || rawAlias.equalsIgnoreCase(company.getLegalName())) {
+        if (rawAlias == null || rawAlias.isBlank() || rawAlias.equalsIgnoreCase(company.getLegalName())) {
             return Mono.just(company);
         }
 
@@ -197,7 +201,7 @@ public class CompanyResolverService {
                 .doOnSuccess(a -> log.info("[Self-Learning] Đã học Alias '{}' cho Company ID: {}", rawAlias, company.getId()))
                 .thenReturn(company)
                 .onErrorResume(e -> {
-                    log.warn("[Self-Learning] Bỏ qua Alias trùng cho Company ID {}: {}", company.getId(), e.getMessage());
+                    log.warn("[Self-Learning] Bỏ qua Alias trùng cho Company: {}", e.getMessage());
                     return Mono.just(company);
                 });
     }
@@ -228,19 +232,15 @@ public class CompanyResolverService {
         return "";
     }
 
-    // Trích xuất chức danh người liên hệ (namecard)
     private String extractContactTitle(String rawText) {
         if (rawText == null || rawText.isBlank()) return "";
         for (String line : rawText.split("\\R")) {
             String value = line.trim();
-            if (TITLE_PATTERN.matcher(value).find()) {
-                return value;
-            }
+            if (TITLE_PATTERN.matcher(value).find()) return value;
         }
         return "";
     }
 
-    // Trích xuất tên người liên hệ (lấy dòng ngay phía trên chức danh)
     private String extractContactName(String rawText) {
         if (rawText == null || rawText.isBlank()) return "";
         String[] lines = rawText.split("\\R");
@@ -264,8 +264,6 @@ public class CompanyResolverService {
     }
 
     private CompanyInfo toCompanyInfo(Company company, double score, String matchedBy) {
-        log.info("[CompanyResolver] Tìm thấy companyId={}, name={}, matchedBy={}, score={}, verification={}",
-                company.getId(), company.getLegalName(), matchedBy, score, company.getVerificationStatus());
         return CompanyInfo.builder()
                 .companyId(company.getId())
                 .companyCode(company.getCompanyCode())
@@ -276,8 +274,7 @@ public class CompanyResolverService {
                 .matchScore(score)
                 .matchedBy(matchedBy)
                 .found(true)
-                .verificationStatus(company.getVerificationStatus() != null
-                        ? company.getVerificationStatus().name() : null)
+                .verificationStatus(company.getVerificationStatus() != null ? company.getVerificationStatus().name() : null)
                 .build();
     }
 
@@ -290,10 +287,6 @@ public class CompanyResolverService {
                 .build();
     }
 
-    /**
-     * Trích xuất các tín hiệu thô từ OCR text để gợi ý cho form nhập liệu.
-     * KHÔNG tra DB, KHÔNG match company, KHÔNG gọi VietQR/Search — chỉ đọc pattern trong text.
-     */
     public CompanySuggestion suggestFields(String rawText) {
         if (rawText == null || rawText.isBlank()) {
             return new CompanySuggestion("", "", "", "");

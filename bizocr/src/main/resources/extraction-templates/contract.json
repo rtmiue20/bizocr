@@ -1,0 +1,40 @@
+{
+  "documentType": "CONTRACT",
+  "fields": [
+    {
+      "key": "party_a",
+      "label": "Bên A",
+      "dataType": "STRING",
+      "required": true,
+      "description": "Tên công ty hoặc cá nhân đại diện Bên A"
+    },
+    {
+      "key": "party_b",
+      "label": "Bên B",
+      "dataType": "STRING",
+      "required": true,
+      "description": "Tên công ty hoặc cá nhân đại diện Bên B"
+    },
+    {
+      "key": "total_amount",
+      "label": "Giá trị hợp đồng",
+      "dataType": "NUMBER",
+      "required": false,
+      "description": "Tổng giá trị hợp đồng bao gồm thuế (nếu có)"
+    },
+    {
+      "key": "effective_date",
+      "label": "Ngày hiệu lực",
+      "dataType": "DATE",
+      "required": false,
+      "description": "Ngày hợp đồng bắt đầu có hiệu lực (định dạng YYYY-MM-DD)"
+    },
+    {
+      "key": "summary",
+      "label": "Tóm tắt nội dung",
+      "dataType": "TEXT",
+      "required": false,
+      "description": "Tóm tắt ngắn gọn nội dung chính của hợp đồng"
+    }
+  ]
+}

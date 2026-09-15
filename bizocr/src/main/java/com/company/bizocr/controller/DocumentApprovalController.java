@@ -32,7 +32,8 @@ public class DocumentApprovalController {
             Mono<Principal> principalMono
     ) {
         return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByIdAndCompanyId(documentId, companyId))
+                // Dùng findByIdAndOwnerCompanyId thay vì findByIdAndCompanyId
+                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(documentId, companyId))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hợp lệ để duyệt"
                 )))

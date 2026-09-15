@@ -1,0 +1,47 @@
+{
+  "documentType": "NAME_CARD",
+  "fields": [
+    {
+      "key": "company_name",
+      "label": "Tên công ty",
+      "dataType": "STRING",
+      "required": false,
+      "description": "Tên doanh nghiệp trên danh thiếp"
+    },
+    {
+      "key": "contact_name",
+      "label": "Họ và tên",
+      "dataType": "STRING",
+      "required": true,
+      "description": "Họ tên người trên danh thiếp"
+    },
+    {
+      "key": "contact_title",
+      "label": "Chức danh",
+      "dataType": "STRING",
+      "required": false,
+      "description": "Chức vụ/vị trí công tác"
+    },
+    {
+      "key": "phone",
+      "label": "Số điện thoại",
+      "dataType": "STRING",
+      "required": false,
+      "description": "Số điện thoại di động hoặc cố định"
+    },
+    {
+      "key": "email",
+      "label": "Email",
+      "dataType": "STRING",
+      "required": false,
+      "description": "Địa chỉ email liên hệ"
+    },
+    {
+      "key": "address",
+      "label": "Địa chỉ",
+      "dataType": "STRING",
+      "required": false,
+      "description": "Địa chỉ văn phòng/công ty"
+    }
+  ]
+}

@@ -43,101 +43,24 @@ public class PipelineOrchestrator {
      */
     public Mono<Document> processDocument(FilePart filePart, Document initialRecord) {
         log.info("Bắt đầu pipeline xử lý cho file: {}", filePart.filename());
-        initialRecord.setStatus("PROCESSING");
-
-        return documentRepository.save(initialRecord)
-                .flatMap(savedRecord -> ocrClientService.extractText(filePart))
-                .flatMap(ocrResult -> {
-                    String rawText = ocrResult.getRawText();
-                    initialRecord.setRawOcrText(rawText);
-                    initialRecord.setOcrEngine(ocrResult.getEngine());
-
-                    if (rawText == null || rawText.isBlank()) {
-                        return markAsFailed(initialRecord);
-                    }
-
-                    // Bước 1: Đối chiếu công ty
-                    return companyResolverService.resolve(rawText)
-                            .flatMap(companyInfo -> {
-                                if (companyInfo.isFound()) {
-                                    log.info("Đã match công ty: {} với score {}",
-                                            companyInfo.getCompanyName(),
-                                            companyInfo.getMatchScore());
-                                    initialRecord.setCompanyId(companyInfo.getCompanyId());
-                                }
-
-                                // Bước 2: Phân loại chứng từ
-                                return classifierService.classifyDocument(rawText)
-                                        .flatMap(classifyResult -> {
-                                            initialRecord.setDocumentType(classifyResult.getDocumentType());
-                                            initialRecord.setConfidenceScore(classifyResult.getConfidenceScore());
-
-                                            // Kiểm tra và chuẩn hóa nhãn Engine Fallback
-                                            boolean usedAiFallback = MatchStrategy.isAiFallback(classifyResult.getMatchedBy());
-                                            initialRecord.setUsedAiFallback(usedAiFallback);
-
-                                            // Thống nhất ghi nhận nhãn OLLAMA_LOCAL vào DB nếu dùng AI Fallback
-                                            String normalizedMatchedBy = usedAiFallback
-                                                    ? MatchStrategy.OLLAMA_LOCAL.name()
-                                                    : classifyResult.getMatchedBy();
-                                            initialRecord.setMatchedBy(normalizedMatchedBy);
-
-                                            initialRecord.setModelVersion("template-v1");
-
-                                            // Bước 3: Bóc tách dữ liệu
-                                            return fieldExtractorService.extractFields(classifyResult, rawText)
-                                                    .map(extractedFields -> {
-                                                        initialRecord.setExtractedFields(extractedFields);
-
-                                                        boolean lowConfidence = classifyResult.getConfidenceScore() == null
-                                                                || classifyResult.getConfidenceScore() < 0.90;
-
-                                                        boolean fieldsIncomplete = extractedFields == null
-                                                                || extractedFields.isBlank()
-                                                                || "{}".equals(extractedFields);
-
-                                                        // Nếu AI nhận diện yếu, thiếu field, HOẶC không tìm thấy công ty -> Needs Review
-                                                        if (usedAiFallback || lowConfidence || fieldsIncomplete || !companyInfo.isFound()) {
-                                                            initialRecord.setStatus("NEED_REVIEW");
-                                                        } else {
-                                                            initialRecord.setStatus("COMPLETED");
-                                                        }
-
-                                                        log.info("Document {}: type={}, matchedBy={}, status={}",
-                                                                initialRecord.getId(),
-                                                                classifyResult.getDocumentType(),
-                                                                initialRecord.getMatchedBy(),
-                                                                initialRecord.getStatus());
-
-                                                        return initialRecord;
-                                                    });
-                                        });
-                            });
-                })
-                .flatMap(documentRepository::save)
-                .onErrorResume(error -> {
-                    log.error("Pipeline thất bại cho document ID {}", initialRecord.getId(), error);
-                    initialRecord.setStatus("FAILED");
-                    return documentRepository.save(initialRecord)
-                            .onErrorResume(saveError -> {
-                                log.error("Không thể cập nhật trạng thái FAILED cho document ID {}", initialRecord.getId(), saveError);
-                                return Mono.just(initialRecord);
-                            })
-                            // Đã lưu status FAILED vào DB, nhưng vẫn phải "ném" lại lỗi gốc để
-                            // OcrQueueConsumer nhận biết đây là job thất bại (log đúng, đẩy vào DLQ)
-                            // thay vì bị coi là một luồng thành công bình thường.
-                            .then(Mono.error(error));
-                });
+        return processInternal(ocrClientService.extractText(filePart), initialRecord);
     }
 
     /**
      * Luồng xử lý chính 2: Chạy từ Resource (Dùng trong Queue/Consumer)
      */
     public Mono<Document> processDocument(Resource resource, Document record) {
+        return processInternal(ocrClientService.scanDocument(resource), record);
+    }
+
+    /**
+     * Hàm xử lý chung cho cả FilePart và Resource
+     */
+    private Mono<Document> processInternal(Mono<com.company.bizocr.model.dto.OcrResult> ocrResultMono, Document record) {
         record.setStatus("PROCESSING");
 
         return documentRepository.save(record)
-                .flatMap(savedRecord -> ocrClientService.scanDocument(resource))
+                .flatMap(savedRecord -> ocrResultMono)
                 .flatMap(ocrResult -> {
                     String rawText = ocrResult.getRawText();
                     record.setRawOcrText(rawText);
@@ -176,7 +99,12 @@ public class PipelineOrchestrator {
                                             record.setModelVersion("template-v1");
 
                                             // Bước 3: Bóc tách dữ liệu
-                                            return fieldExtractorService.extractFields(classifyResult, rawText)
+                                            String docId = record.getId() != null ? String.valueOf(record.getId()) : null;
+                                            Mono<String> extractMono = docId != null
+                                                    ? fieldExtractorService.extractFields(docId, classifyResult, rawText)
+                                                    : fieldExtractorService.extractFields(classifyResult, rawText);
+
+                                            return extractMono
                                                     .map(extractedFields -> {
                                                         record.setExtractedFields(extractedFields);
 
@@ -187,6 +115,7 @@ public class PipelineOrchestrator {
                                                                 || extractedFields.isBlank()
                                                                 || "{}".equals(extractedFields);
 
+                                                        // Nếu AI nhận diện yếu, thiếu field, HOẶC không tìm thấy công ty -> Needs Review
                                                         if (usedAiFallback || lowConfidence || fieldsIncomplete || !companyInfo.isFound()) {
                                                             record.setStatus("NEED_REVIEW");
                                                         } else {

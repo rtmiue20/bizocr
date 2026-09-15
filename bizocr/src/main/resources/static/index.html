@@ -309,7 +309,7 @@
             </div>
 
             <div class="card" id="classifyResultCard" style="display:none">
-                <h3>Kết quả</h3>
+                <h3>KẾT QUẢ PHÂN LOẠI</h3>
                 <table class="kv-table" id="classifyTable"></table>
             </div>
         </div>
@@ -611,9 +611,8 @@
                 document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
                 $('tab-' + item.dataset.tab).style.display = 'block';
 
-                // Tự động tải dữ liệu thật từ Document ID hiện tại khi vào các bước cần liên động
                 const tab = item.dataset.tab;
-                if (!currentDocId()) return; // chưa có Document ID (chưa upload) -> để trống, không tự gọi API
+                if (!currentDocId()) return;
                 if (tab === 'classify') loadClassifyTextFromDoc();
                 if (tab === 'edit') loadEditFieldsFromDoc();
                 if (tab === 'approve') loadApproveSuggestionFromDoc();
@@ -648,10 +647,10 @@
         // ---------------- BƯỚC 1: CHỤP ẢNH TỪ CAMERA ----------------
         const cameraBox = $('cameraBox'), cameraVideo = $('cameraVideo'), cameraCanvas = $('cameraCanvas'), cameraHint = $('cameraHint');
         let cameraStream = null;
-        let facingMode = 'environment'; // ưu tiên camera sau (phù hợp chụp chứng từ trên điện thoại)
+        let facingMode = 'environment';
 
         async function startCamera() {
-            stopCamera(); // đảm bảo không mở chồng 2 stream
+            stopCamera();
             cameraBox.style.display = 'block';
             cameraHint.textContent = 'Đang mở camera… trình duyệt có thể hỏi cấp quyền truy cập Camera, bấm Cho phép.';
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -660,11 +659,21 @@
             }
             try {
                 cameraStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: { ideal: facingMode } },
+                    video: {
+                        facingMode: { ideal: facingMode },
+                        width: { ideal: 3840 },
+                        height: { ideal: 2160 }
+                    },
                     audio: false
                 });
                 cameraVideo.srcObject = cameraStream;
-                cameraHint.textContent = 'Canh chứng từ vào giữa khung hình rồi bấm "Chụp ảnh".';
+
+                const track = cameraStream.getVideoTracks()[0];
+                const settings = track ? track.getSettings() : {};
+                const resText = (settings.width && settings.height)
+                    ? `${settings.width}×${settings.height}`
+                    : 'không xác định';
+                cameraHint.textContent = `Canh chứng từ vào giữa khung hình rồi bấm "Chụp ảnh". (Độ phân giải camera: ${resText})`;
             } catch (err) {
                 cameraHint.textContent = 'Không mở được camera: ' + err.message + ' — kiểm tra quyền Camera của trình duyệt / hệ điều hành.';
             }
@@ -758,7 +767,7 @@
             }
         });
 
-        // ---------------- BƯỚC 4: tự tải rawOcrText ----------------
+        // ---------------- BƯỚC 4: PHÂN LOẠI NHANH ----------------
         async function loadClassifyTextFromDoc() {
             $('classifyLoadHint').textContent = 'Đang tải...';
             const doc = await fetchCurrentDoc();
@@ -770,7 +779,34 @@
         }
         $('btnLoadClassifyText').addEventListener('click', loadClassifyTextFromDoc);
 
-// ---------------- BƯỚC 5: tự tải extractedFields ----------------
+        $('btnClassify').addEventListener('click', async () => {
+            const text = $('classifyText').value.trim();
+            if (!text) { alert('Vui lòng nhập hoặc tải rawOcrText trước khi phân loại.'); return; }
+
+            const result = await apiFetch(springBase(), '/api/v1/documents/classify', {
+                method: 'POST',
+                body: { rawOcrText: text, rawText: text }
+            });
+
+            $('classifyResultCard').style.display = 'block';
+            if (!result.ok) {
+                $('classifyTable').innerHTML = `<tr><td colspan="2" style="color:var(--err)">Không phân loại được (status ${result.status || 'ERR'}) — kiểm tra log API.</td></tr>`;
+                return;
+            }
+
+            const d = result.data || {};
+            const docType = d.documentType || d.type || d.predictedType || 'OTHER';
+            const confidence = d.confidenceScore !== undefined ? d.confidenceScore : (d.confidence !== undefined ? d.confidence : '—');
+            const matchedBy = d.matchedBy || d.matchedRule || d.method || '—';
+
+            $('classifyTable').innerHTML = `
+                <tr><td>documentType</td><td><span class="badge APPROVED">${escapeHtml(docType)}</span></td></tr>
+                <tr><td>confidenceScore</td><td><span class="mono">${escapeHtml(confidence)}</span></td></tr>
+                <tr><td>matchedBy</td><td><span class="mono">${escapeHtml(matchedBy)}</span></td></tr>
+            `;
+        });
+
+        // ---------------- BƯỚC 5: SỬA FIELD ----------------
         async function loadEditFieldsFromDoc() {
             $('editLoadHint').textContent = 'Đang tải...';
             const doc = await fetchCurrentDoc();
@@ -792,7 +828,26 @@
         }
         $('btnLoadEditFields').addEventListener('click', loadEditFieldsFromDoc);
 
-// ---------------- BƯỚC 6: tự gợi ý taxCode/companyName/contactName ----------------
+        $('btnSubmitEdit').addEventListener('click', async () => {
+            const id = currentDocId();
+            if (!id) { alert('Chưa có Document ID.'); return; }
+            const status = $('editStatus').value;
+            const fieldsStr = $('editFields').value.trim();
+            let extractedFields = {};
+            if (fieldsStr) {
+                try { extractedFields = JSON.parse(fieldsStr); }
+                catch(e) { alert('extractedFields JSON không hợp lệ: ' + e.message); return; }
+            }
+
+            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}`, {
+                method: 'PUT',
+                body: { status, extractedFields: JSON.stringify(extractedFields) }
+            });
+            $('editResultCard').style.display = 'block';
+            $('editResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
+        });
+
+        // ---------------- BƯỚC 6: DUYỆT ----------------
         async function loadApproveSuggestionFromDoc() {
             $('approveLoadHint').textContent = 'Đang tra cứu gợi ý từ OCR...';
             const id = currentDocId();
@@ -803,7 +858,6 @@
                 $('approveLoadHint').textContent = `Không lấy được gợi ý (status ${result.status || 'network error'}) — điền tay bên dưới.`;
                 return;
             }
-
             const suggestion = result.data || {};
             $('approveBody').value = JSON.stringify({
                 taxCode: suggestion.taxCode || '',
@@ -817,6 +871,44 @@
                 : 'OCR không tìm được taxCode/companyName rõ ràng — điền tay bên dưới.';
         }
         $('btnLoadApproveSuggestion').addEventListener('click', loadApproveSuggestionFromDoc);
+
+        $('btnApprove').addEventListener('click', async () => {
+            const id = currentDocId();
+            if (!id) { alert('Chưa có Document ID.'); return; }
+            const docType = $('approveType').value;
+            const contactName = $('approveContactName').value.trim();
+            const contactTitle = $('approveContactTitle').value.trim();
+
+            let body = {};
+            const bodyStr = $('approveBody').value.trim();
+            if (bodyStr) {
+                try { body = JSON.parse(bodyStr); }
+                catch(e) { alert('Body JSON không hợp lệ: ' + e.message); return; }
+            }
+
+            body.documentType = docType;
+            if (contactName) body.contactName = contactName;
+            if (contactTitle) body.contactTitle = contactTitle;
+
+            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/approve`, {
+                method: 'POST',
+                body
+            });
+
+            $('approveResultCard').style.display = 'block';
+            if (result.ok && result.data) {
+                const res = result.data;
+                $('approveCompanyTable').innerHTML = `
+                    <tr><td>Mã số thuế</td><td>${escapeHtml(res.taxCode || '—')}</td></tr>
+                    <tr><td>Tên công ty</td><td>${escapeHtml(res.companyName || '—')}</td></tr>
+                    <tr><td>Địa chỉ</td><td>${escapeHtml(res.address || '—')}</td></tr>
+                `;
+                $('approveIndustryList').textContent = res.industry || res.industries || '—';
+                $('approveResultBody').textContent = JSON.stringify(res, null, 2);
+            } else {
+                $('approveResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
+            }
+        });
 
         // ---------------- BƯỚC 7: EXPORT ----------------
         $('btnExport').addEventListener('click', async () => {

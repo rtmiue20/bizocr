@@ -66,7 +66,7 @@ public class FieldAuditService {
             if (!Objects.equals(oldVal, newVal)) {
                 auditList.add(FieldCorrectionAudit.builder()
                         .documentId(doc.getId())
-                        .companyId(doc.getCompanyId())
+                        .companyId(doc.getOwnerCompanyId())   // ← đổi từ doc.getCompanyId()
                         .fieldName(key)
                         .originalValue(oldVal)
                         .correctedValue(newVal)

@@ -54,6 +54,12 @@ public class DocumentTemplate {
     private List<String> primaryKeywords = new ArrayList<>();
 
     /**
+     * Danh sách tiêu đề mẫu phục vụ thuật toán so khớp mờ Fuzzy Title Match.
+     */
+    @Builder.Default
+    private List<String> sampleTitles = new ArrayList<>();
+
+    /**
      * Danh sách từ khóa phụ / ngữ cảnh (Secondary / Context keywords).
      */
     @Builder.Default

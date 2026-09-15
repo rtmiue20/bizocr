@@ -18,26 +18,25 @@ import java.util.regex.Pattern;
 @Component
 public class TemplateMatcher {
 
-    // Ngưỡng độ tin cậy mặc định để chấp nhận kết quả Template Matching
     private static final double DEFAULT_CONFIDENCE_THRESHOLD = 0.70;
 
     // Danh mục các mẫu chứng từ được quản lý tập trung (Thread-safe)
     private final Map<String, DocumentTemplate> templateCatalog = new ConcurrentHashMap<>();
 
+    // Inject FuzzyTitleMatcher phục vụ Tầng 2 So khớp mờ
+    private final FuzzyTitleMatcher fuzzyTitleMatcher;
+
     public TemplateMatcher() {
+        this(new FuzzyTitleMatcher());
+    }
+
+    public TemplateMatcher(FuzzyTitleMatcher fuzzyTitleMatcher) {
+        this.fuzzyTitleMatcher = fuzzyTitleMatcher != null ? fuzzyTitleMatcher : new FuzzyTitleMatcher();
         initStandardTemplates();
     }
 
     /**
-     * Khởi tạo danh mục các mẫu chứng từ cốt lõi và các loại chứng từ mới xuất hiện nhiều nhất từ hệ thống vận hành:
-     * 1. Hóa đơn GTGT (VAT_INVOICE)
-     * 2. Phiếu thanh toán dịch vụ (SERVICE_PAYMENT_VOUCHER / RECEIPT) - Chiếm ~30% lưu lượng vận hành
-     * 3. Hóa đơn tiền điện (ELECTRICITY_BILL) - Chiếm ~20% lưu lượng vận hành
-     * 4. Hóa đơn tiền nước (WATER_BILL)
-     * 5. Hợp đồng / Biên bản quyết toán / Nghiệm thu (CONTRACT)
-     * 6. Ủy nhiệm chi / Sao kê ngân hàng (BANK_STATEMENT)
-     * 7. Căn cước công dân / CMND (ID_CARD)
-     * 8. Danh thiếp (NAME_CARD)
+     * Khởi tạo danh mục các mẫu chứng từ cốt lõi
      */
     private void initStandardTemplates() {
         // 1. Hóa đơn giá trị gia tăng (VAT Invoice)
@@ -53,6 +52,9 @@ public class TemplateMatcher {
                         "hóa đơn điện tử", "hoa don dien tu",
                         "hóa đơn vat", "hoa don vat"
                 ))
+                .sampleTitles(List.of(
+                        "HOA DON GIA TRI GIA TANG", "HOA DON BAN HANG", "HOA DON DIEN TU", "HOA DON VAT"
+                ))
                 .secondaryKeywords(List.of(
                         "mã số thuế", "ma so thue", "mst",
                         "mẫu số", "mau so", "ký hiệu", "ky hieu", "số hóa đơn", "so hoa don",
@@ -66,7 +68,7 @@ public class TemplateMatcher {
                 ))
                 .build());
 
-        // 2. Phiếu thanh toán dịch vụ (Service Payment Voucher / Receipt) - Xuất hiện phổ biến nhất từ log
+        // 2. Phiếu thanh toán dịch vụ (Service Payment Voucher / Receipt)
         registerTemplate(DocumentTemplate.builder()
                 .documentType("SERVICE_PAYMENT_VOUCHER")
                 .displayName("Phiếu thanh toán dịch vụ / Hóa đơn bán lẻ")
@@ -82,6 +84,9 @@ public class TemplateMatcher {
                         "hóa đơn bán lẻ", "hoa don ban le",
                         "phiếu tính tiền", "phieu tinh tien"
                 ))
+                .sampleTitles(List.of(
+                        "PHIEU THANH TOAN DICH VU", "PHIEU THANH TOAN", "PHIEU THU", "PHIEU CHI", "BIEN LAI THU TIEN", "HOA DON BAN LE"
+                ))
                 .secondaryKeywords(List.of(
                         "tổng chi phí", "tong chi phi",
                         "tổng cộng", "tong cong",
@@ -96,7 +101,7 @@ public class TemplateMatcher {
                 ))
                 .build());
 
-        // 3. Hóa đơn tiền điện (Electricity Bill / EVN) - Xuất hiện tần suất cao từ log
+        // 3. Hóa đơn tiền điện (Electricity Bill / EVN)
         registerTemplate(DocumentTemplate.builder()
                 .documentType("ELECTRICITY_BILL")
                 .displayName("Hóa đơn tiền điện / Thông báo tiền điện EVN")
@@ -113,6 +118,9 @@ public class TemplateMatcher {
                         "điện lực miền trung", "dien luc mien trung",
                         "hóa đơn tiền điện", "hoa don tien dien",
                         "giấy báo tiền điện", "giay bao tien dien"
+                ))
+                .sampleTitles(List.of(
+                        "HOA DON TIEN DIEN", "GIAY BAO TIEN DIEN", "TONG CONG TY DIEN LUC", "CONG TY DIEN LUC"
                 ))
                 .secondaryKeywords(List.of(
                         "thẻ khách hàng", "the khach hang",
@@ -142,6 +150,9 @@ public class TemplateMatcher {
                         "hóa đơn tiền nước", "hoa don tien nuoc",
                         "giấy báo tiền nước", "giay bao tien nuoc"
                 ))
+                .sampleTitles(List.of(
+                        "HOA DON TIEN NUOC", "GIAY BAO TIEN NUOC", "CONG TY CAP NUOC"
+                ))
                 .secondaryKeywords(List.of(
                         "mã danh bộ", "ma danh bo", "số danh bộ", "so danh bo",
                         "mã khách hàng", "ma khach hang",
@@ -154,7 +165,7 @@ public class TemplateMatcher {
                 ))
                 .build());
 
-        // 5. Hợp đồng kinh tế / Biên bản quyết toán / Nghiệm thu (Contract & Settlement)
+        // 5. Hợp đồng kinh tế / Biên bản quyết toán / Nghiệm thu (Contract)
         registerTemplate(DocumentTemplate.builder()
                 .documentType("CONTRACT")
                 .displayName("Hợp đồng kinh tế / Biên bản quyết toán nghiệm thu")
@@ -172,6 +183,9 @@ public class TemplateMatcher {
                         "biên bản nghiệm thu", "bien ban nghiem thu",
                         "biên bản thanh lý hợp đồng", "bien ban thanh ly hop dong"
                 ))
+                .sampleTitles(List.of(
+                        "HOP DONG KINH TE", "HOP DONG DICH VU", "HOP DONG LAO DONG", "BIEN BAN QUYET TOAN", "BIEN BAN NGHIEM THU"
+                ))
                 .secondaryKeywords(List.of(
                         "bên a", "ben a", "bên b", "ben b",
                         "điều khoản", "dieu khoan",
@@ -186,7 +200,7 @@ public class TemplateMatcher {
                 ))
                 .build());
 
-        // 6. Ủy nhiệm chi / Giấy nộp tiền ngân hàng (Bank Statement & Payment Order)
+        // 6. Ủy nhiệm chi / Giấy nộp tiền ngân hàng (Bank Statement)
         registerTemplate(DocumentTemplate.builder()
                 .documentType("BANK_STATEMENT")
                 .displayName("Ủy nhiệm chi / Giấy nộp tiền ngân hàng")
@@ -199,6 +213,9 @@ public class TemplateMatcher {
                         "lệnh chuyển tiền", "lenh chuyen tien",
                         "phiếu chuyển tiền", "phieu chuyen tien",
                         "sao kê tài khoản", "sao ke tai khoan"
+                ))
+                .sampleTitles(List.of(
+                        "UY NHIEM CHI", "GIAY NOP TIEN", "LENH CHUYEN TIEN", "SAO KE TAI KHOAN"
                 ))
                 .secondaryKeywords(List.of(
                         "ngân hàng", "ngan hang", "bank",
@@ -227,6 +244,9 @@ public class TemplateMatcher {
                         "thẻ căn cước", "the can cuoc",
                         "citizen identity card", "identity card"
                 ))
+                .sampleTitles(List.of(
+                        "CAN CUOC CONG DAN", "CHUNG MINH NHAN DAN", "THE CAN CUOC", "CITIZEN IDENTITY CARD"
+                ))
                 .secondaryKeywords(List.of(
                         "số / no", "so / no", "số định danh", "so dinh danh",
                         "họ và tên", "ho va ten",
@@ -245,33 +265,38 @@ public class TemplateMatcher {
                 .documentType("NAME_CARD")
                 .displayName("Danh thiếp / Card Visit")
                 .category("IDENTITY")
-                .priority(7)
+                .priority(9)
                 .confidenceThreshold(0.70)
                 .primaryKeywords(List.of(
-                        "danh thiếp", "danh thiep", "name card", "business card",
-                        "giám đốc", "giam doc", "director", "manager", "ceo", "founder", "chủ tịch", "chu tich"
+                        "danh thiếp", "danh thiep", "name card", "business card", "card visit",
+                        "giám đốc tài chính", "giam doc tai chinh", "cfo", "chief financial officer",
+                        "tổng giám đốc", "tong giam doc", "phó tổng giám đốc", "pho tong giam doc",
+                        "giám đốc điều hành", "giam doc dieu hanh", "ceo", "chief executive officer",
+                        "giám đốc", "giam doc", "director", "managing director", "general director",
+                        "trưởng phòng", "truong phong", "phó phòng", "pho phong", "head of",
+                        "manager", "deputy manager", "founder", "co-founder", "chủ tịch", "chu tich",
+                        "chairman", "president", "vice president", "kế toán trưởng", "ke toan truong",
+                        "chuyên viên", "chuyen vien", "consultant", "specialist", "sales executive"
+                ))
+                .sampleTitles(List.of(
+                        "BUSINESS CARD", "NAME CARD", "CARD VISIT"
                 ))
                 .secondaryKeywords(List.of(
-                        "phone", "mobile", "email", "website", "address",
-                        "tel", "fax", "hotline", "địa chỉ", "dia chi", "điện thoại", "dien thoai"
+                        "phone", "mobile", "email", "e-mail", "website", "address",
+                        "tel", "fax", "hotline", "ext", "địa chỉ", "dia chi", "điện thoại", "dien thoai",
+                        "tax code", "mst", "mã số thuế", "ma so thue", "tower", "tầng", "tang", "p.", "phòng", "tp.hcm", "tphcm", "hà nội", "ha noi"
                 ))
                 .regexPatterns(List.of(
-                        Pattern.compile("(?:phone|tel|mobile|hotline)[:\\s]*[0-9+\\-\\s.()]{8,15}", Pattern.CASE_INSENSITIVE),
-                        Pattern.compile("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", Pattern.CASE_INSENSITIVE),
-                        // FIX: Số điện thoại Việt Nam KHÔNG có nhãn "phone:"/"tel:" đi kèm.
-                        // Namecard thật thường in trần số điện thoại (vd: "0912 345 678"), OCR
-                        // không giữ được nhãn hoặc namecard vốn không thiết kế có nhãn.
-                        // Nguyên nhân gốc khiến NAME_CARD từng chỉ đạt 0.60 điểm (dưới ngưỡng 0.70).
-                        Pattern.compile("\\b0[0-9]{9,10}\\b"),
-                        // FIX: Domain KHÔNG có "http(s)://" hoặc "www." đi kèm, vd: "abc.com.vn"
-                        Pattern.compile("\\b(?:www\\.)?[a-zA-Z0-9-]+\\.(?:com|net|vn|org|info)(?:\\.vn)?\\b", Pattern.CASE_INSENSITIVE)
+                        Pattern.compile("(?:phone|tel|mobile|hotline)[:\\s]*[0-9+\\-\\s.()]{8,20}", Pattern.CASE_INSENSITIVE),
+                        Pattern.compile("(?:e-?mail)[:\\s]*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", Pattern.CASE_INSENSITIVE),
+                        Pattern.compile("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9@.-]+\\.[a-zA-Z]{2,}", Pattern.CASE_INSENSITIVE),
+                        Pattern.compile("\\b(?:84|\\+84|0)[0-9\\-\\s.]{8,15}\\b"),
+                        Pattern.compile("\\b(?:www\\.)?[a-zA-Z0-9-]+\\.(?:com|net|vn|org|info|c@m)(?:\\.vn)?\\b", Pattern.CASE_INSENSITIVE),
+                        Pattern.compile("(?:tax\\s*code|mst|mã\\s*số\\s*thuế)[:\\s]*[0-9]{10}", Pattern.CASE_INSENSITIVE)
                 ))
                 .build());
     }
 
-    /**
-     * Đăng ký hoặc cập nhật một mẫu chứng từ vào danh mục
-     */
     public void registerTemplate(DocumentTemplate template) {
         if (template != null && template.getDocumentType() != null && !template.getDocumentType().isBlank()) {
             templateCatalog.put(template.getDocumentType().toUpperCase(), template);
@@ -280,33 +305,21 @@ public class TemplateMatcher {
         }
     }
 
-    /**
-     * Hủy đăng ký một mẫu chứng từ
-     */
     public void removeTemplate(String documentType) {
         if (documentType != null) {
             templateCatalog.remove(documentType.toUpperCase());
         }
     }
 
-    /**
-     * Lấy toàn bộ danh mục mẫu chứng từ đã đăng ký
-     */
     public List<DocumentTemplate> getRegisteredTemplates() {
         return new ArrayList<>(templateCatalog.values());
     }
 
-    /**
-     * Lấy mẫu chứng từ theo mã loại
-     */
     public Optional<DocumentTemplate> getTemplate(String documentType) {
         if (documentType == null) return Optional.empty();
         return Optional.ofNullable(templateCatalog.get(documentType.toUpperCase()));
     }
 
-    /**
-     * Thực hiện khớp mẫu chuỗi văn bản OCR với danh mục các loại chứng từ
-     */
     public Optional<ClassifyResult> match(String rawText) {
         if (rawText == null || rawText.isBlank()) {
             return Optional.empty();
@@ -319,18 +332,15 @@ public class TemplateMatcher {
         double maxScore = 0.0;
 
         for (DocumentTemplate template : templateCatalog.values()) {
-            double score = calculateMatchScore(template, lowerText, unaccentedText);
+            double score = calculateMatchScore(template, rawText, lowerText, unaccentedText);
 
-            // Ưu tiên theo điểm số và độ ưu tiên priority
             if (score > maxScore || (Math.abs(score - maxScore) < 0.001 && bestTemplate != null && template.getPriority() > bestTemplate.getPriority())) {
                 maxScore = score;
                 bestTemplate = template;
             }
         }
 
-        // Kiểm tra điều kiện vượt qua ngưỡng tin cậy
         if (bestTemplate != null && maxScore >= bestTemplate.getConfidenceThreshold()) {
-            // Chuẩn hóa điểm tin cậy: nếu đã khớp tốt các từ khóa nhận diện, gán điểm >= 0.85 để đảm bảo an toàn cho ClassifierService
             double finalConfidence = Math.min(Math.max(maxScore, 0.85), 0.98);
 
             log.info("[TemplateMatcher] Khớp thành công loại chứng từ: {} ({}) với điểm số tin cậy: {}",
@@ -345,17 +355,16 @@ public class TemplateMatcher {
                     .build());
         }
 
-        // Không khớp mẫu nào -> Trả về Empty để kích hoạt AI Fallback
         return Optional.empty();
     }
 
     /**
-     * Thuật toán chấm điểm mức độ tương đồng giữa văn bản OCR và mẫu chứng từ
+     * Thuật toán chấm điểm mức độ tương đồng kết hợp Keyword + Fuzzy Title + Regex
      */
-    private double calculateMatchScore(DocumentTemplate template, String lowerText, String unaccentedText) {
+    private double calculateMatchScore(DocumentTemplate template, String rawText, String lowerText, String unaccentedText) {
         double score = 0.0;
 
-        // 1. So khớp từ khóa chính / Tiêu đề (Primary Keywords) - Trọng số quyết định cao
+        // 1. So khớp từ khóa chính (Primary Keywords)
         List<String> primaryKeywords = template.getPrimaryKeywords();
         if (primaryKeywords != null && !primaryKeywords.isEmpty()) {
             long primaryMatches = primaryKeywords.stream()
@@ -367,12 +376,18 @@ public class TemplateMatcher {
                     .count();
 
             if (primaryMatches > 0) {
-                // Khớp ít nhất 1 từ khóa tiêu đề chính được điểm nền tảng 0.60, khớp thêm tăng dần
-                score += 0.60 + Math.min(0.20, (double) (primaryMatches - 1) * 0.05);
+                score += 0.50 + Math.min(0.15, (double) (primaryMatches - 1) * 0.05);
             }
         }
 
-        // 2. So khớp từ khóa phụ / Ngữ cảnh (Secondary Keywords)
+        // 2. So khớp mờ tiêu đề (Fuzzy Title Matching Bonus)
+        double fuzzyBonus = fuzzyTitleMatcher.calculateTitleBonus(rawText, template.getSampleTitles());
+        if (fuzzyBonus > 0) {
+            score += (0.25 * fuzzyBonus);
+            log.debug("[TemplateMatcher] Fuzzy Title Bonus [{}] = +{}", template.getDocumentType(), Math.round(0.25 * fuzzyBonus * 100.0) / 100.0);
+        }
+
+        // 3. So khớp từ khóa phụ / ngữ cảnh (Secondary Keywords)
         List<String> secondaryKeywords = template.getSecondaryKeywords();
         if (secondaryKeywords != null && !secondaryKeywords.isEmpty()) {
             long secondaryMatches = secondaryKeywords.stream()
@@ -384,10 +399,10 @@ public class TemplateMatcher {
                     .count();
 
             double secondaryRatio = (double) secondaryMatches / secondaryKeywords.size();
-            score += Math.min(0.30, secondaryRatio * 0.40);
+            score += Math.min(0.20, secondaryRatio * 0.30);
         }
 
-        // 3. So khớp Regex đặc trưng (Regex Patterns)
+        // 4. So khớp Regex đặc trưng (Regex Patterns)
         List<Pattern> regexPatterns = template.getRegexPatterns();
         if (regexPatterns != null && !regexPatterns.isEmpty()) {
             long regexMatches = regexPatterns.stream()
@@ -402,9 +417,6 @@ public class TemplateMatcher {
         return score;
     }
 
-    /**
-     * Tiện ích chuẩn hóa loại bỏ dấu tiếng Việt (Diacritics Stripping)
-     */
     public static String removeVietnameseAccents(String input) {
         if (input == null || input.isBlank()) {
             return "";
@@ -415,9 +427,6 @@ public class TemplateMatcher {
         return normalized;
     }
 
-    /**
-     * Dọn dẹp toàn bộ các mẫu chứng từ động nạp từ DB (giữ nguyên các mẫu hardcode cốt lõi)
-     */
     public void clearDynamicTemplates() {
         templateCatalog.entrySet().removeIf(entry ->
                 "DYNAMIC_DB".equalsIgnoreCase(entry.getValue().getCategory())

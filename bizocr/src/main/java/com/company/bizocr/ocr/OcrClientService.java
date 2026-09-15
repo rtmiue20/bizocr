@@ -1,8 +1,8 @@
 package com.company.bizocr.ocr;
 
 import com.company.bizocr.model.dto.OcrResult;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
@@ -16,13 +16,17 @@ import java.time.Duration;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class OcrClientService {
 
     private static final String OCR_ENDPOINT = "/api/v1/ocr";
     private static final Duration OCR_TIMEOUT = Duration.ofSeconds(60);
 
     private final WebClient ocrWebClient;
+
+    // Sử dụng @Qualifier để chọn đích danh Bean ocrWebClient (trỏ đến Python Service)
+    public OcrClientService(@Qualifier("ocrWebClient") WebClient ocrWebClient) {
+        this.ocrWebClient = ocrWebClient;
+    }
 
     public Mono<OcrResult> extractText(FilePart filePart) {
         MultipartBodyBuilder builder = new MultipartBodyBuilder();
