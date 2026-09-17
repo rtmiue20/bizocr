@@ -36,7 +36,8 @@ public class WebClientConfig {
                 .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
 
-        HttpClient httpClient = buildTimeoutHttpClient(10000, 30);
+        // Đã tăng thời gian chờ từ 30 lên 180 giây
+        HttpClient httpClient = buildTimeoutHttpClient(10000, 180);
 
         return WebClient.builder()
                 .baseUrl(ocrServiceUrl)
@@ -45,7 +46,7 @@ public class WebClientConfig {
                 .build();
     }
 
-    @Primary // Đánh dấu đây là WebClient mặc định cho toàn hệ thống
+    @Primary
     @Bean
     public WebClient externalWebClient() {
         HttpClient httpClient = buildTimeoutHttpClient(5000, 10);

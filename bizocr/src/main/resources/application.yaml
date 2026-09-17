@@ -45,16 +45,18 @@ logging:
 bizocr:
   python-service:
     url: ${PYTHON_SERVICE_URL:http://localhost:8000}
+
+  tax-search:
+    service:
+      url: ${TAX_SEARCH_SERVICE_URL:http://localhost:8000}
+      provider: duckduckgo  # Chỉ định dùng DuckDuckGo qua Python Service
+
   classification:
     ai-confidence-threshold: 0.80
-  search:
-    google:
-      api-key: ${GOOGLE_SEARCH_API_KEY:}
-      cx: ${GOOGLE_SEARCH_ENGINE_ID:}
 
   ollama:
-    auto-manage: true      # true = Spring Boot tự kill + khởi động lại Ollama mỗi lần chạy app
-    force-cpu: true         # true = ép CPU-only (đang cần vì driver GPU lỗi CUDA). Đổi false khi driver đã sửa xong.
+    auto-manage: true      # true = Spring Boot tự quản lý Ollama process
+    force-cpu: true         # true = ép CPU-only
     startup-timeout-seconds: 60
 
 ---
@@ -79,3 +81,7 @@ spring:
 bizocr:
   python-service:
     url: ${PYTHON_SERVICE_URL:http://extractor-service:8000}
+  tax-search:
+    service:
+      url: ${TAX_SEARCH_SERVICE_URL:http://extractor-service:8000}
+      provider: duckduckgo

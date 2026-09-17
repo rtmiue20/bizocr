@@ -29,13 +29,13 @@ public class ExternalTaxSearchService {
      *
      * application.properties:
      *
-     * bizocr.search.ddg.base-url=http://localhost:8090
+     * bizocr.search.ddg.base-url=http://localhost:8000
      *
      * Docker Compose:
      *
-     * bizocr.search.ddg.base-url=http://tax-search:8090
+     * bizocr.search.ddg.base-url=http://tax-search:8000
      */
-    @Value("${bizocr.search.ddg.base-url:http://localhost:8090}")
+    @Value("${bizocr.search.ddg.base-url:http://localhost:8000}")
     private String duckDuckGoSearchBaseUrl;
 
     private static final Pattern TAX_CODE_PATTERN =
@@ -332,7 +332,7 @@ public class ExternalTaxSearchService {
     private String buildDuckDuckGoEndpoint() {
         if (duckDuckGoSearchBaseUrl == null
                 || duckDuckGoSearchBaseUrl.isBlank()) {
-            return "http://localhost:8090/api/tax-search";
+            return "http://localhost:8000/api/tax-search";
         }
 
         if (duckDuckGoSearchBaseUrl.endsWith("/")) {

@@ -16,7 +16,6 @@ public class DocumentApproveRequest {
     private String approvedType;        // VD: NAMECARD, ELECTRICITY_BILL
     private String companyName;         // Tên công ty do con người xác nhận
     private String taxCode;             // Mã số thuế (nếu có)
-    private String reviewedBy;          // User thực hiện duyệt
     private Map<String, Object> updatedFields; // JSON fields đã được human correction
     private String contactName;
     private String contactTitle;

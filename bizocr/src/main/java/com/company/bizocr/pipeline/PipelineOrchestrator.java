@@ -3,6 +3,8 @@ package com.company.bizocr.pipeline;
 import com.company.bizocr.classify.ClassifierService;
 import com.company.bizocr.company.CompanyResolverService;
 import com.company.bizocr.extract.FieldExtractorService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.ocr.OcrClientService;
 import com.company.bizocr.repository.DocumentRepository;
@@ -12,6 +14,8 @@ import org.springframework.core.io.Resource;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Service
@@ -37,6 +41,7 @@ public class PipelineOrchestrator {
     private final FieldExtractorService fieldExtractorService;
     private final DocumentRepository documentRepository;
     private final CompanyResolverService companyResolverService;
+    private final ObjectMapper objectMapper;
 
     /**
      * Luồng xử lý chính 1: Chạy trực tiếp từ FilePart
@@ -117,7 +122,7 @@ public class PipelineOrchestrator {
 
                                                         // Nếu AI nhận diện yếu, thiếu field, HOẶC không tìm thấy công ty -> Needs Review
                                                         if (usedAiFallback || lowConfidence || fieldsIncomplete || !companyInfo.isFound()) {
-                                                            record.setStatus("NEED_REVIEW");
+                                                            record.setStatus("NEEDS_REVIEW");
                                                         } else {
                                                             record.setStatus("COMPLETED");
                                                         }

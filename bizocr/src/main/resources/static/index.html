@@ -898,12 +898,15 @@
             $('approveResultCard').style.display = 'block';
             if (result.ok && result.data) {
                 const res = result.data;
+                // Backend trả company info lồng trong res.company, không phải top-level
+                const company = res.company || {};
                 $('approveCompanyTable').innerHTML = `
-                    <tr><td>Mã số thuế</td><td>${escapeHtml(res.taxCode || '—')}</td></tr>
-                    <tr><td>Tên công ty</td><td>${escapeHtml(res.companyName || '—')}</td></tr>
-                    <tr><td>Địa chỉ</td><td>${escapeHtml(res.address || '—')}</td></tr>
+                    <tr><td>Mã số thuế</td><td>${escapeHtml(company.taxCode || '—')}</td></tr>
+                    <tr><td>Tên công ty</td><td>${escapeHtml(company.legalName || company.companyName || '—')}</td></tr>
+                    <tr><td>Địa chỉ</td><td>${escapeHtml(company.address || '—')}</td></tr>
                 `;
-                $('approveIndustryList').textContent = res.industry || res.industries || '—';
+                const industries = Array.isArray(company.suggestedIndustries) ? company.suggestedIndustries : [];
+                $('approveIndustryList').textContent = industries.length ? industries.join(', ') : '—';
                 $('approveResultBody').textContent = JSON.stringify(res, null, 2);
             } else {
                 $('approveResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);

@@ -3,12 +3,13 @@ package com.company.bizocr.service;
 import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.model.entity.FieldCorrectionAudit;
 import com.company.bizocr.repository.FieldCorrectionAuditRepository;
+import com.company.bizocr.security.CurrentUserResolver; // Giả định package, bạn điều chỉnh lại nếu cần
+import com.company.bizocr.security.CurrentUser;         // Giả định package
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
@@ -25,25 +26,29 @@ public class FieldAuditService {
 
     private final FieldCorrectionAuditRepository auditRepository;
     private final ObjectMapper objectMapper;
+    private final CurrentUserResolver currentUserResolver; // Inject resolver mới
 
     /**
      * So sánh JSON cũ và JSON mới, tự động ghi vết sự khác biệt vào DB
      */
-    public Mono<Void> logFieldCorrections(Document doc, String newExtractedFieldsJson, String reviewer) {
+    public Mono<Void> logFieldCorrections(Document doc, String newExtractedFieldsJson) { // Bỏ tham số reviewer
         if (newExtractedFieldsJson == null || newExtractedFieldsJson.isBlank()) {
             return Mono.empty();
         }
 
-        return Mono.fromCallable(() -> calculateDiff(doc, newExtractedFieldsJson, reviewer))
+        // Lấy thông tin user đang thao tác từ context, sau đó tính diff và lưu DB
+        return currentUserResolver.getCurrentUser()
+                .flatMap(currentUser -> Mono.fromCallable(() -> calculateDiff(doc, newExtractedFieldsJson, currentUser)))
                 .flatMapMany(auditRepository::saveAll)
-                .doOnNext(audit -> log.info("[Audit] Lưu vết sửa đổi docId={}: field '{}' ('{}' -> '{}')",
-                        audit.getDocumentId(), audit.getFieldName(), audit.getOriginalValue(), audit.getCorrectedValue()))
+                .doOnNext(audit -> log.info("[Audit] Lưu vết sửa đổi docId={}: field '{}' ('{}' -> '{}') bởi {}",
+                        audit.getDocumentId(), audit.getFieldName(), audit.getOriginalValue(), audit.getCorrectedValue(), audit.getReviewedBy()))
                 .then();
     }
 
     private static final Set<String> METADATA_KEYS = Set.of("field_confidences", "anomaly_analysis");
 
-    private List<FieldCorrectionAudit> calculateDiff(Document doc, String newJsonStr, String reviewer) throws Exception {
+    // Thay String reviewer bằng object CurrentUser
+    private List<FieldCorrectionAudit> calculateDiff(Document doc, String newJsonStr, CurrentUser currentUser) throws Exception {
         String oldJsonStr = (doc.getExtractedFields() != null && !doc.getExtractedFields().isBlank())
                 ? doc.getExtractedFields()
                 : "{}";
@@ -66,11 +71,12 @@ public class FieldAuditService {
             if (!Objects.equals(oldVal, newVal)) {
                 auditList.add(FieldCorrectionAudit.builder()
                         .documentId(doc.getId())
-                        .companyId(doc.getOwnerCompanyId())   // ← đổi từ doc.getCompanyId()
+                        .companyId(doc.getOwnerCompanyId())
                         .fieldName(key)
                         .originalValue(oldVal)
                         .correctedValue(newVal)
-                        .reviewedBy(reviewer)
+                        .reviewedBy(currentUser.username()) // Trích xuất username trực tiếp từ context
+                        .reviewedByRole(currentUser.rolesAsString()) // Thêm role cho data train Mô hình B
                         .reviewedAt(now)
                         .build());
             }

@@ -1,6 +1,8 @@
 package com.company.bizocr.service;
 
 import com.company.bizocr.model.dto.OllamaTaskPayload;
+import com.company.bizocr.model.entity.Document;
+import com.company.bizocr.repository.DocumentRepository;
 import com.company.bizocr.validator.ExtractionValidatorService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
@@ -23,6 +25,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class OllamaQueueService implements SmartLifecycle {
 
     private static final String QUEUE_NAME = "ocr:ollama:tasks";
+    private static final String PROCESSING_QUEUE = "ocr:ollama:processing";
+    private static final String FAILED_QUEUE = "ocr:ollama:failed";
+    private static final String AI_MODEL_VERSION = "ollama-local";
     private final Scheduler ollamaScheduler = Schedulers.newBoundedElastic(2, 100, "ollama-worker");
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private Disposable workerDisposable;
@@ -31,31 +36,36 @@ public class OllamaQueueService implements SmartLifecycle {
     private final ObjectMapper objectMapper;
     private final ChatClient chatClient;
     private final ExtractionValidatorService extractionValidatorService;
+    private final DocumentRepository documentRepository;
 
     public OllamaQueueService(
             StringRedisTemplate redisTemplate,
             ObjectMapper objectMapper,
             ChatClient.Builder chatClientBuilder,
-            ExtractionValidatorService extractionValidatorService
+            ExtractionValidatorService extractionValidatorService,
+            DocumentRepository documentRepository
     ) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.chatClient = chatClientBuilder.build();
         this.extractionValidatorService = extractionValidatorService;
+        this.documentRepository = documentRepository;
     }
 
-    public void enqueueTask(String documentId, String documentType, String rawText) {
+    public boolean enqueueTask(String documentId, String documentType, String rawText) {
         if (!isRunning.get()) {
             log.warn(">> [Ollama Queue] Queue service đang trong trạng thái dừng hoặc chưa khởi động, không nhận task (DocID: {})", documentId);
-            return;
+            return false;
         }
         try {
             OllamaTaskPayload payload = new OllamaTaskPayload(documentId, documentType, rawText);
             String jsonPayload = objectMapper.writeValueAsString(payload);
             redisTemplate.opsForList().leftPush(QUEUE_NAME, jsonPayload);
             log.info(">> [Ollama Queue] Đã đẩy task vào Redis (DocID: {})", documentId);
+            return true;
         } catch (Exception e) {
             log.error("Lỗi khi push task vào Redis Queue", e);
+            return false;
         }
     }
 
@@ -114,8 +124,7 @@ public class OllamaQueueService implements SmartLifecycle {
                         log.error(">> [Ollama Worker] Lỗi khi thực thi processNextTask trong flatMap:", err);
                         return Mono.empty();
                     });
-                })
-                .onErrorContinue((error, obj) -> log.error(">> [Ollama Worker] Lỗi ở luồng chính (không mong muốn):", error))
+                }, 2)
                 .subscribe(
                         success -> {},
                         error -> log.error(">> [Ollama Worker] Worker đã chết vĩnh viễn vì lỗi:", error)

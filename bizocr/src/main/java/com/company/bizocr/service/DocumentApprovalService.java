@@ -10,7 +10,6 @@ import com.company.bizocr.model.dto.response.DocumentApproveResponse;
 import com.company.bizocr.model.dto.response.TaxLookupResponse;
 import com.company.bizocr.model.entity.Company;
 import com.company.bizocr.model.entity.CompanyAlias;
-import com.company.bizocr.model.entity.FieldCorrectionAudit;
 import com.company.bizocr.repository.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -31,13 +30,13 @@ public class DocumentApprovalService {
     private final DocumentRepository documentRepository;
     private final CompanyRepository companyRepository;
     private final CompanyAliasRepository aliasRepository;
-    private final FieldCorrectionAuditRepository auditRepository;
     private final TaxApiClient taxApiClient;
     private final ObjectMapper objectMapper;
     private final PythonMlClient pythonMlClient;
     private final CompanyNameNormalizer nameNormalizer;
     private final ExternalTaxSearchService externalTaxSearchService;
     private final IndustryRepository industryRepository;
+    private final FieldAuditService fieldAuditService;
 
     @Transactional
     public Mono<DocumentApproveResponse> approveDocument(Long documentId, DocumentApproveRequest request) {
@@ -49,10 +48,21 @@ public class DocumentApprovalService {
                                 .flatMap(taxLookup -> upsertCompany(request, taxLookup)
                                         .flatMap(company -> {
 
-                                            // 1. Audit Log Mono (Map về Boolean để zip không ngắt giữa chừng nếu rỗng)
-                                            Mono<Boolean> auditMono = saveAuditLog(doc.getId(), company.getId(), doc.getExtractedFields(), request)
-                                                    .map(audit -> true)
-                                                    .defaultIfEmpty(true);
+                                            // 1. Audit Log Mono (Đã sửa lỗi tham số: chỉ gọi 2 tham số)
+                                            Mono<Boolean> auditMono;
+                                            try {
+                                                String updatedFieldsJson = objectMapper.writeValueAsString(request.getUpdatedFields());
+                                                auditMono = fieldAuditService.logFieldCorrections(doc, updatedFieldsJson)
+                                                        .then(Mono.just(true))
+                                                        .defaultIfEmpty(true)
+                                                        .onErrorResume(e -> {
+                                                            log.error("[Approve] Lỗi khi ghi Audit Log chi tiết: {}", e.getMessage());
+                                                            return Mono.just(true);
+                                                        });
+                                            } catch (Exception e) {
+                                                log.error("[Approve] Lỗi parse JSON cho Audit Log: {}", e.getMessage());
+                                                auditMono = Mono.just(true);
+                                            }
 
                                             // Gán dữ liệu cho Entity Document
                                             try {
@@ -60,7 +70,6 @@ public class DocumentApprovalService {
                                                 doc.setDocumentType(request.getApprovedType());
                                                 doc.setCompanyId(company.getId());
 
-                                                // Gán 2 trường liên hệ từ request vào Document
                                                 doc.setContactName(request.getContactName());
                                                 doc.setContactTitle(request.getContactTitle());
 
@@ -97,7 +106,7 @@ public class DocumentApprovalService {
                                             // Zip toàn bộ Mono chạy song song và chờ kết quả
                                             return Mono.zip(auditMono, collectMlDataMono, suggestedIndustriesMono)
                                                     .flatMap(tuple -> {
-                                                        List<CompanyIndustryDetail> suggestedIndustries = tuple.getT3(); // Lấy data từ tuple
+                                                        List<CompanyIndustryDetail> suggestedIndustries = tuple.getT3();
 
                                                         // Lưu DB và trả về response
                                                         return documentRepository.save(doc)
@@ -115,7 +124,7 @@ public class DocumentApprovalService {
                                                                                 .matchScore(taxLookup.getTaxCode() != null ? 1.0 : 0.8)
                                                                                 .matchedBy(taxLookup.getTaxCode() != null ? "TAX_API" : "MANUAL")
                                                                                 .found(true)
-                                                                                .suggestedIndustries(suggestedIndustries) // Đưa list đã resolve vào đây
+                                                                                .suggestedIndustries(suggestedIndustries)
                                                                                 .build())
                                                                         .build());
                                                     });
@@ -126,24 +135,6 @@ public class DocumentApprovalService {
                                                 e.getMessage(), e))
                                 )
                 );
-    }
-
-    private Mono<FieldCorrectionAudit> saveAuditLog(Long docId, Long companyId, String originalFields, DocumentApproveRequest req) {
-        if (req.getUpdatedFields() == null) return Mono.empty();
-        try {
-            FieldCorrectionAudit audit = FieldCorrectionAudit.builder()
-                    .documentId(docId)
-                    .companyId(companyId)
-                    .fieldName("extractedFields")
-                    .originalValue(originalFields)
-                    .correctedValue(objectMapper.writeValueAsString(req.getUpdatedFields()))
-                    .reviewedBy(req.getReviewedBy())
-                    .reviewedAt(LocalDateTime.now().toString())
-                    .build();
-            return auditRepository.save(audit);
-        } catch (Exception e) {
-            return Mono.empty();
-        }
     }
 
     private Mono<Company> upsertCompany(DocumentApproveRequest req, TaxLookupResponse tax) {
@@ -219,7 +210,7 @@ public class DocumentApprovalService {
             alias.setAliasName(requestedName);
             alias.setNormalizedAlias(nameNormalizer.normalize(requestedName));
             alias.setSource("NAMECARD");
-            alias.setConfidenceScore(1.0); // Người duyệt đã xác nhận thủ công -> tin cậy tuyệt đối
+            alias.setConfidenceScore(1.0);
             alias.setCreatedAt(LocalDateTime.now().toString());
             return aliasRepository.save(alias)
                     .doOnError(e -> log.error("[Approve] Lỗi lưu CompanyAlias: {}", e.getMessage(), e))

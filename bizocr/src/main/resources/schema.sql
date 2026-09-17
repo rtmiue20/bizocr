@@ -87,6 +87,13 @@ CREATE TABLE IF NOT EXISTS documents (
     confidence_score     DOUBLE,                                -- 0.0 - 1.0
     status               VARCHAR(50)   DEFAULT 'PENDING',       -- PENDING, PROCESSING, COMPLETED, NEEDS_REVIEW, FAILED
     extracted_fields     JSON,
+
+    -- Generated columns từ extracted_fields (Phase 1 - virtual columns cho query nhanh không parse JSON)
+    -- LƯU Ý: '$.issue_date' cần xác nhận đúng tên key thật trong JSON trước khi chạy trên production
+    tax_code             VARCHAR(20)   AS (JSON_UNQUOTE(JSON_EXTRACT(extracted_fields, '$.tax_code'))) STORED,
+    issue_date           VARCHAR(20)   AS (JSON_UNQUOTE(JSON_EXTRACT(extracted_fields, '$.issue_date'))) STORED,
+    total_amount         VARCHAR(30)   AS (JSON_UNQUOTE(JSON_EXTRACT(extracted_fields, '$.total_amount'))) STORED,
+
     received_at          VARCHAR(50),
     file_path            VARCHAR(255),
 
@@ -120,6 +127,9 @@ CREATE TABLE IF NOT EXISTS documents (
     PRIMARY KEY (id),
     KEY idx_documents_owner_company_id (owner_company_id),
     KEY idx_documents_company_id (company_id),
+    KEY idx_documents_tax_code (tax_code),
+    KEY idx_documents_issue_date (issue_date),
+    KEY idx_documents_total_amount (total_amount),
     CONSTRAINT fk_documents_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL
     ) ENGINE=InnoDB;
 
@@ -127,13 +137,14 @@ CREATE TABLE IF NOT EXISTS documents (
 -- 6. FIELD_CORRECTION_AUDITS — audit log khi kế toán sửa field
 -- =========================================================
 CREATE TABLE IF NOT EXISTS field_correction_audits (
-                                                       id                BIGINT        NOT NULL AUTO_INCREMENT,
-                                                       document_id       BIGINT        NOT NULL,
-                                                       company_id        BIGINT        NOT NULL,
-                                                       field_name        VARCHAR(100)  NOT NULL,
+    id                BIGINT        NOT NULL AUTO_INCREMENT,
+    document_id       BIGINT        NOT NULL,
+    company_id        BIGINT        NOT NULL,
+    field_name        VARCHAR(100)  NOT NULL,
     original_value    TEXT,
     corrected_value   TEXT,
     reviewed_by       VARCHAR(100)  NOT NULL,
+    reviewed_by_role  VARCHAR(50),
     reviewed_at       VARCHAR(50)   NOT NULL,
 
     PRIMARY KEY (id),
@@ -146,8 +157,8 @@ CREATE TABLE IF NOT EXISTS field_correction_audits (
 -- 7. TEMPLATE_CONFIG — cấu hình loại chứng từ (động, không hardcode)
 -- =========================================================
 CREATE TABLE IF NOT EXISTS template_config (
-                                               id              BIGINT       NOT NULL AUTO_INCREMENT,
-                                               doc_type_code   VARCHAR(100) NOT NULL,
+    id              BIGINT       NOT NULL AUTO_INCREMENT,
+    doc_type_code   VARCHAR(100) NOT NULL,
     display_name    VARCHAR(255) NOT NULL,
     anchors         TEXT         NOT NULL,   -- từ khóa định danh, cách nhau bởi dấu phẩy
     status          VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
@@ -163,8 +174,8 @@ CREATE TABLE IF NOT EXISTS template_config (
 -- 8. TEMPLATE_FIELD_CONFIG — cấu hình field theo từng loại chứng từ
 -- =========================================================
 CREATE TABLE IF NOT EXISTS template_field_config (
-                                                     id              BIGINT        NOT NULL AUTO_INCREMENT,
-                                                     doc_type_code   VARCHAR(100)  NOT NULL,
+    id              BIGINT        NOT NULL AUTO_INCREMENT,
+    doc_type_code   VARCHAR(100)  NOT NULL,
     field_key       VARCHAR(100)  NOT NULL,
     ui_label        VARCHAR(255)  NOT NULL,
     data_type       VARCHAR(20)   NOT NULL,   -- TEXT / NUMBER / DATE
@@ -178,4 +189,22 @@ CREATE TABLE IF NOT EXISTS template_field_config (
     CONSTRAINT fk_field_config_doc_type
     FOREIGN KEY (doc_type_code) REFERENCES template_config (doc_type_code)
     ON UPDATE CASCADE ON DELETE CASCADE
+    ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS users (
+    id             BIGINT        NOT NULL AUTO_INCREMENT,
+    username       VARCHAR(100)  NOT NULL,
+    password_hash  VARCHAR(255)  NOT NULL,
+    email          VARCHAR(255)  NOT NULL,
+    phone_number   VARCHAR(50),
+    role           VARCHAR(50)   NOT NULL DEFAULT 'REVIEWER',
+    company_id     BIGINT        NOT NULL,
+    active         TINYINT(1)    NOT NULL DEFAULT 1,
+    created_at     VARCHAR(100),
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_users_username (username),
+    UNIQUE KEY uk_users_email (email),
+    KEY idx_users_company_id (company_id),
+    CONSTRAINT fk_users_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
     ) ENGINE=InnoDB;

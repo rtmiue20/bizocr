@@ -21,5 +21,6 @@ public class FieldCorrectionAudit {
     private String originalValue;
     private String correctedValue;
     private String reviewedBy;
+    private String reviewedByRole;
     private String reviewedAt;
 }

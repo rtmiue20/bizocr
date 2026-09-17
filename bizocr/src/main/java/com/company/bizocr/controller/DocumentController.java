@@ -10,12 +10,10 @@ import com.company.bizocr.model.dto.response.DocumentPageResponse;
 import com.company.bizocr.model.dto.response.UploadResponse;
 import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.repository.DocumentRepository;
-import com.company.bizocr.service.DocumentReviewService;
 import com.company.bizocr.service.ExcelExportService;
 import com.company.bizocr.storage.StorageService;
+import com.company.bizocr.security.CurrentUserResolver; // Nhớ check lại package nếu khác
 import org.springframework.http.HttpStatus;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.server.ResponseStatusException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -45,86 +43,25 @@ public class DocumentController {
     private final ReactiveStringRedisTemplate redisTemplate;
     private final ExcelExportService excelExportService;
     private final ClassifierService classifierService;
-    private final DocumentReviewService documentReviewService;
     private final FieldAuditService fieldAuditService;
     private final ObjectMapper objectMapper;
     private final CompanyResolverService companyResolverService;
-
-    // --- Helper function: Trích xuất companyId từ JWT Token hoặc Security Context ---
-    private Mono<Long> getCurrentCompanyId(Mono<java.security.Principal> principalMono) {
-        return principalMono
-                .switchIfEmpty(Mono.error(new ResponseStatusException(
-                        HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực"
-                )))
-                .flatMap(principal -> {
-                    if (!(principal instanceof JwtAuthenticationToken jwtAuth)) {
-                        return Mono.error(new ResponseStatusException(
-                                HttpStatus.UNAUTHORIZED, "Định dạng xác thực không hợp lệ"
-                        ));
-                    }
-
-                    Jwt token = jwtAuth.getToken();
-                    Object raw = token.getClaim("companyId");
-
-                    Long companyId = parseClaimAsLong(raw);
-                    if (companyId == null) {
-                        return Mono.error(new ResponseStatusException(
-                                HttpStatus.FORBIDDEN, "Token thiếu hoặc sai định dạng claim companyId"
-                        ));
-                    }
-
-                    return Mono.just(companyId);
-                });
-    }
-
-    /**
-     * Ép kiểu linh hoạt claim companyId về Long, bất kể IdP trả về dạng nào
-     * (JWT numeric claim có thể decode thành Long, Integer, Double, hoặc String tùy thư viện).
-     */
-    private Long parseClaimAsLong(Object claim) {
-        if (claim == null) {
-            return null;
-        }
-        try {
-            if (claim instanceof Long l) {
-                return l;
-            }
-            if (claim instanceof Integer i) {
-                return i.longValue();
-            }
-            if (claim instanceof Double d) {
-                return d.longValue();
-            }
-            if (claim instanceof Number n) {
-                return n.longValue();
-            }
-            if (claim instanceof String s && !s.isBlank()) {
-                return Long.valueOf(s.trim());
-            }
-        } catch (NumberFormatException e) {
-            log.warn("[Auth] Claim companyId không parse được về Long: {}", claim);
-        }
-        return null;
-    }
+    private final CurrentUserResolver currentUserResolver; // Inject Resolver chuẩn
 
     // 1. C - Create
     // API Upload tập trung (Gắn thêm companyId khi tạo mới)
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Mono<UploadResponse> uploadDocument(
-            @RequestPart("file") FilePart filePart,
-            Mono<java.security.Principal> principalMono) {
+    public Mono<UploadResponse> uploadDocument(@RequestPart("file") FilePart filePart) {
 
-        return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> storageService.saveFile(filePart)
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> storageService.saveFile(filePart)
                         .flatMap(savedFilePath -> {
                             Document record = Document.builder()
                                     .fileName(filePart.filename())
                                     .filePath(savedFilePath)
                                     .status("PENDING")
-                                    .ownerCompanyId(companyId) // FIX: dùng cột riêng cho tenant sở hữu, KHÔNG dùng companyId
-                                    // (companyId sẽ bị PipelineOrchestrator ghi đè bằng công ty OCR nhận diện trong
-                                    // nội dung chứng từ - dùng companyId ở đây sẽ làm mất quyền sở hữu tenant sau khi
-                                    // pipeline chạy xong, khiến mọi findByIdAndOwnerCompanyId() sau đó 404 sai)
+                                    .ownerCompanyId(currentUser.companyId())
                                     .receivedAt(LocalDateTime.now().toString())
                                     .build();
 
@@ -153,42 +90,14 @@ public class DocumentController {
         return classifierService.classifyDocument(rawOcrText);
     }
 
-//    // API Phê duyệt chứng từ (Kiểm tra quyền sở hữu công ty trước khi duyệt)
-//    @PostMapping("/{id}/approve")
-//    public Mono<ResponseEntity<Void>> approveDocument(
-//            @PathVariable Long id,
-//            @RequestParam String approvedType,
-//            Mono<java.security.Principal> principalMono) {
-//
-//        return getCurrentCompanyId(principalMono)
-//                // Chặn đứng IDOR: Phải là document của đúng công ty mới cho phép duyệt
-//                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(id, companyId))
-//                .switchIfEmpty(Mono.error(new ResponseStatusException(
-//                        HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hợp lệ để duyệt"
-//                )))
-//                .flatMap(doc -> principalMono.map(java.security.Principal::getName))
-//                .switchIfEmpty(Mono.error(new ResponseStatusException(
-//                        HttpStatus.UNAUTHORIZED, "Truy cập bị từ chối: Không tìm thấy thông tin xác thực"
-//                )))
-//                .flatMap(currentUser -> documentReviewService.approveDocument(id, approvedType, currentUser))
-//                .thenReturn(ResponseEntity.ok().build());
-//    }
-
-    // Endpoint approve đã chuyển hẳn sang DocumentApprovalController (đã có check companyId/IDOR ở đó).
-    // KHÔNG định nghĩa lại "@PostMapping({id}/approve)" ở class này, sẽ gây lỗi Ambiguous mapping khi khởi động app.
-
     // 2. R - Read
-    // API Lấy file vật lý để hiển thị UI (Đã bọc companyId)
+    // API Lấy file vật lý để hiển thị UI
     @GetMapping("/{id}/file")
-    public Mono<ResponseEntity<Resource>> getDocumentFile(
-            @PathVariable Long id,
-            Mono<java.security.Principal> principalMono) {
-
-        return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(id, companyId))
-                .switchIfEmpty(Mono.error(new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền truy cập"
-                )))
+    public Mono<ResponseEntity<Resource>> getDocumentFile(@PathVariable Long id) {
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> documentRepository.findByIdAndOwnerCompanyId(id, currentUser.companyId()))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền truy cập")))
                 .flatMap(record -> storageService.loadFileAsResource(record.getFilePath()))
                 .map(resource -> {
                     String filename = resource.getFilename();
@@ -202,59 +111,60 @@ public class DocumentController {
                 });
     }
 
-    // API Lấy danh sách chứng từ (Đã vá lỗi Multi-tenant)
+    // API Lấy danh sách chứng từ
     @GetMapping
     public Mono<DocumentPageResponse> getDocuments(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String documentType,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
-            Mono<java.security.Principal> principalMono) {
+            @RequestParam(defaultValue = "10") int size) {
 
         long offset = (long) page * size;
 
-        return getCurrentCompanyId(principalMono).flatMap(companyId -> {
-            Mono<List<Document>> itemsMono = documentRepository
-                    .findByFilterAndOwnerCompanyId(status, documentType, companyId, size, offset)
-                    .collectList();
-            Mono<Long> totalMono = documentRepository
-                    .countByFilterAndOwnerCompanyId(status, documentType, companyId);
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> {
+                    Mono<List<Document>> itemsMono = documentRepository
+                            .findByFilterAndOwnerCompanyId(status, documentType, currentUser.companyId(), size, offset)
+                            .collectList();
+                    Mono<Long> totalMono = documentRepository
+                            .countByFilterAndOwnerCompanyId(status, documentType, currentUser.companyId());
 
-            return Mono.zip(itemsMono, totalMono)
-                    .map(tuple -> {
-                        List<Document> items = tuple.getT1();
-                        long total = tuple.getT2();
-                        int totalPages = (int) Math.ceil((double) total / size);
+                    return Mono.zip(itemsMono, totalMono)
+                            .map(tuple -> {
+                                List<Document> items = tuple.getT1();
+                                long total = tuple.getT2();
+                                int totalPages = (int) Math.ceil((double) total / size);
 
-                        return DocumentPageResponse.builder()
-                                .items(items)
-                                .totalElements(total)
-                                .page(page)
-                                .size(size)
-                                .totalPages(totalPages)
-                                .build();
-                    });
-        });
+                                return DocumentPageResponse.builder()
+                                        .items(items)
+                                        .totalElements(total)
+                                        .page(page)
+                                        .size(size)
+                                        .totalPages(totalPages)
+                                        .build();
+                            });
+                });
     }
 
-    // API Xem chi tiết 1 chứng từ (Đã vá lỗi Multi-tenant IDOR)
+    // API Xem chi tiết 1 chứng từ
     @GetMapping("/{id}")
-    public Mono<Document> getDocumentById(
-            @PathVariable Long id,
-            Mono<java.security.Principal> principalMono) {
-
-        return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(id, companyId))
+    public Mono<Document> getDocumentById(@PathVariable Long id) {
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> documentRepository.findByIdAndOwnerCompanyId(id, currentUser.companyId()))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
                         "Không tìm thấy chứng từ hoặc bạn không có quyền truy cập dữ liệu của công ty khác"
                 )));
     }
-    // API Xuất báo cáo Excel (Đã cách ly dữ liệu export theo tenant)
+
+    // API Xuất báo cáo Excel
     @GetMapping("/export")
-    public Mono<ResponseEntity<byte[]>> exportApprovedDocuments(Mono<java.security.Principal> principalMono) {
-        return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByStatusAndOwnerCompanyId("APPROVED", companyId)
+    public Mono<ResponseEntity<byte[]>> exportApprovedDocuments() {
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> documentRepository.findByStatusAndOwnerCompanyId("APPROVED", currentUser.companyId())
                         .collectList()
                         .flatMap(excelExportService::exportToExcel)
                 )
@@ -265,25 +175,20 @@ public class DocumentController {
     }
 
     @GetMapping("/{id}/company-suggestion")
-    public Mono<CompanySuggestion> getCompanySuggestion(
-            @PathVariable Long id,
-            Mono<java.security.Principal> principalMono) {
-
-        return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(id, companyId))
-                .switchIfEmpty(Mono.error(new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền truy cập"
-                )))
+    public Mono<CompanySuggestion> getCompanySuggestion(@PathVariable Long id) {
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> documentRepository.findByIdAndOwnerCompanyId(id, currentUser.companyId()))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền truy cập")))
                 .map(doc -> companyResolverService.suggestFields(doc.getRawOcrText()));
     }
 
     // 3. U - Update, P - Put
-    // API Cập nhật thông tin chứng từ tổng quát (Đã tích hợp Validate JSON & Audit Diff)
+    // API Cập nhật thông tin chứng từ tổng quát
     @PutMapping("/{id}")
     public Mono<Document> updateDocument(
             @PathVariable Long id,
-            @RequestBody DocumentUpdateRequest request,
-            Mono<java.security.Principal> principalMono) {
+            @RequestBody DocumentUpdateRequest request) {
 
         // 1. Validate Status Whitelist
         if (request.getStatus() != null) {
@@ -304,7 +209,7 @@ public class DocumentController {
             }
         }
 
-        // 2. TÍNH NĂNG MỚI: Validate định dạng JSON từ Client
+        // 2. Validate định dạng JSON từ Client
         if (request.getExtractedFields() != null && !request.getExtractedFields().isBlank()) {
             try {
                 objectMapper.readTree(request.getExtractedFields());
@@ -317,18 +222,14 @@ public class DocumentController {
         }
 
         // 3. Cập nhật và ghi Audit Vết sửa đổi
-        return getCurrentCompanyId(principalMono)
-                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(id, companyId))
-                .switchIfEmpty(Mono.error(new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền cập nhật"
-                )))
-                .flatMap(doc -> principalMono
-                        .map(java.security.Principal::getName)
-                        .defaultIfEmpty("admin")
-                        .flatMap(reviewer -> {
-                            // Ghi Log Audit nếu có truyền extractedFields mới
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> documentRepository.findByIdAndOwnerCompanyId(id, currentUser.companyId())
+                        .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền cập nhật")))
+                        .flatMap(doc -> {
+                            // Gọi FieldAuditService mà không cần truyền currentUser (vì Service đã tự handle)
                             Mono<Void> auditMono = (request.getExtractedFields() != null)
-                                    ? fieldAuditService.logFieldCorrections(doc, request.getExtractedFields(), reviewer)
+                                    ? fieldAuditService.logFieldCorrections(doc, request.getExtractedFields())
                                     : Mono.empty();
 
                             return auditMono.then(Mono.defer(() -> {
@@ -338,7 +239,7 @@ public class DocumentController {
                                 if (request.getExtractedFields() != null) {
                                     doc.setExtractedFields(request.getExtractedFields());
                                 }
-                                doc.setReviewedBy(reviewer);
+                                doc.setReviewedBy(currentUser.username());
                                 doc.setReviewedAt(LocalDateTime.now().toString());
 
                                 return documentRepository.save(doc);
