@@ -3,11 +3,13 @@ package com.company.bizocr.pipeline;
 import com.company.bizocr.classify.ClassifierService;
 import com.company.bizocr.company.CompanyResolverService;
 import com.company.bizocr.extract.FieldExtractorService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.company.bizocr.model.entity.Document;
+import com.company.bizocr.model.entity.DocumentStatus;
 import com.company.bizocr.ocr.OcrClientService;
 import com.company.bizocr.repository.DocumentRepository;
+import com.company.bizocr.statemachine.DocumentStateMachine;
+import com.company.bizocr.statemachine.DocumentStateMachine.TransitionResult;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
@@ -15,14 +17,27 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
-import java.util.concurrent.atomic.AtomicReference;
-
+/**
+ * Điều phối luồng xử lý chứng từ OCR.
+ *
+ * <h3>Thay đổi so với phiên bản cũ</h3>
+ * <p>Mọi cập nhật trạng thái nay đi qua {@link DocumentStateMachine#transition},
+ * không còn {@code setStatus(String)} + {@code save()} rải rác.
+ * Điều này đảm bảo:
+ * <ul>
+ *   <li>Race-condition được phát hiện tại DB (UPDATE WHERE status = :from).</li>
+ *   <li>Phân biệt rõ <b>idempotent retry</b> (vô hại) vs <b>state mismatch</b> (lệch luồng thật).</li>
+ *   <li>Bảng FSM là nguồn sự thật duy nhất — transition sai bị reject ngay trước khi chạm DB.</li>
+ * </ul>
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class PipelineOrchestrator {
 
-    // Enum quản lý các chiến lược phân loại & bóc tách chứng từ
+    /**
+     * Enum quản lý các chiến lược phân loại & bóc tách chứng từ.
+     */
     public enum MatchStrategy {
         TEMPLATE_MATCHING,
         REGEX_PARSER,
@@ -42,122 +57,196 @@ public class PipelineOrchestrator {
     private final DocumentRepository documentRepository;
     private final CompanyResolverService companyResolverService;
     private final ObjectMapper objectMapper;
+    private final DocumentStateMachine stateMachine;
 
-    /**
-     * Luồng xử lý chính 1: Chạy trực tiếp từ FilePart
-     */
+    // =========================================================================
+    // Public entry points
+    // =========================================================================
+
+    /** Luồng 1: Chạy trực tiếp từ FilePart (upload sync) */
     public Mono<Document> processDocument(FilePart filePart, Document initialRecord) {
-        log.info("Bắt đầu pipeline xử lý cho file: {}", filePart.filename());
+        log.info("[Pipeline] Bắt đầu xử lý file: {}", filePart.filename());
         return processInternal(ocrClientService.extractText(filePart), initialRecord);
     }
 
-    /**
-     * Luồng xử lý chính 2: Chạy từ Resource (Dùng trong Queue/Consumer)
-     */
+    /** Luồng 2: Chạy từ Resource (Queue/Consumer) */
     public Mono<Document> processDocument(Resource resource, Document record) {
         return processInternal(ocrClientService.scanDocument(resource), record);
     }
 
-    /**
-     * Hàm xử lý chung cho cả FilePart và Resource
-     */
-    private Mono<Document> processInternal(Mono<com.company.bizocr.model.dto.OcrResult> ocrResultMono, Document record) {
-        record.setStatus("PROCESSING");
+    // =========================================================================
+    // Internal pipeline
+    // =========================================================================
 
-        return documentRepository.save(record)
-                .flatMap(savedRecord -> ocrResultMono)
+    private Mono<Document> processInternal(
+            Mono<com.company.bizocr.model.dto.OcrResult> ocrResultMono,
+            Document record) {
+
+        // ── Step 0: PENDING → PROCESSING ─────────────────────────────────────
+        return stateMachine.transition(record.getId(), DocumentStatus.PENDING, DocumentStatus.PROCESSING)
+                .flatMap(result -> handleMismatch(result, record, DocumentStatus.PROCESSING))
+
+                // ── Step 1: Gọi OCR engine ────────────────────────────────────
+                .flatMap(ignored -> ocrResultMono)
                 .flatMap(ocrResult -> {
                     String rawText = ocrResult.getRawText();
                     record.setRawOcrText(rawText);
                     record.setOcrEngine(ocrResult.getEngine());
 
                     if (rawText == null || rawText.isBlank()) {
-                        return markAsFailed(record);
+                        return forceFailAndError(record, "OCR trả về text rỗng");
                     }
 
-                    // Bước 1: Đối chiếu công ty
-                    return companyResolverService.resolve(rawText)
+                    // ── Step 2: PROCESSING → OCR_DONE ────────────────────────
+                    return stateMachine.transition(record.getId(),
+                                    DocumentStatus.PROCESSING, DocumentStatus.OCR_DONE)
+                            .flatMap(r -> handleMismatch(r, record, DocumentStatus.OCR_DONE))
+
+                            // ── Step 3: Đối chiếu công ty (không đổi trạng thái) ─
+                            .flatMap(ignored2 -> companyResolverService.resolve(rawText))
                             .flatMap(companyInfo -> {
                                 if (companyInfo.isFound()) {
-                                    log.info("Đã match công ty: {} với score {}",
+                                    log.info("[Pipeline] Matched công ty: {} score={}",
                                             companyInfo.getCompanyName(),
                                             companyInfo.getMatchScore());
                                     record.setCompanyId(companyInfo.getCompanyId());
                                 }
 
-                                // Bước 2: Phân loại chứng từ
+                                // ── Step 4: OCR_DONE → CLASSIFIED ────────────
                                 return classifierService.classifyDocument(rawText)
                                         .flatMap(classifyResult -> {
                                             record.setDocumentType(classifyResult.getDocumentType());
                                             record.setConfidenceScore(classifyResult.getConfidenceScore());
 
-                                            // Kiểm tra và chuẩn hóa nhãn Engine Fallback
-                                            boolean usedAiFallback = MatchStrategy.isAiFallback(classifyResult.getMatchedBy());
+                                            boolean usedAiFallback = MatchStrategy.isAiFallback(
+                                                    classifyResult.getMatchedBy());
                                             record.setUsedAiFallback(usedAiFallback);
-
-                                            // Thống nhất ghi nhận nhãn OLLAMA_LOCAL vào DB nếu dùng AI Fallback
-                                            String normalizedMatchedBy = usedAiFallback
+                                            record.setMatchedBy(usedAiFallback
                                                     ? MatchStrategy.OLLAMA_LOCAL.name()
-                                                    : classifyResult.getMatchedBy();
-                                            record.setMatchedBy(normalizedMatchedBy);
-
+                                                    : classifyResult.getMatchedBy());
                                             record.setModelVersion("template-v1");
 
-                                            // Bước 3: Bóc tách dữ liệu
-                                            String docId = record.getId() != null ? String.valueOf(record.getId()) : null;
-                                            Mono<String> extractMono = docId != null
-                                                    ? fieldExtractorService.extractFields(docId, classifyResult, rawText)
-                                                    : fieldExtractorService.extractFields(classifyResult, rawText);
+                                            return stateMachine.transition(record.getId(),
+                                                            DocumentStatus.OCR_DONE, DocumentStatus.CLASSIFIED)
+                                                    .flatMap(r -> handleMismatch(r, record, DocumentStatus.CLASSIFIED))
 
-                                            return extractMono
-                                                    .map(extractedFields -> {
+                                                    // ── Step 5: CLASSIFIED → EXTRACTED ──────
+                                                    .flatMap(ignored3 -> {
+                                                        String docId = record.getId() != null
+                                                                ? String.valueOf(record.getId()) : null;
+                                                        Mono<String> extractMono = docId != null
+                                                                ? fieldExtractorService.extractFields(
+                                                                docId, classifyResult, rawText)
+                                                                : fieldExtractorService.extractFields(
+                                                                classifyResult, rawText);
+                                                        return extractMono;
+                                                    })
+                                                    .flatMap(extractedFields -> {
                                                         record.setExtractedFields(extractedFields);
 
-                                                        boolean lowConfidence = classifyResult.getConfidenceScore() == null
-                                                                || classifyResult.getConfidenceScore() < 0.90;
+                                                        return stateMachine.transition(record.getId(),
+                                                                        DocumentStatus.CLASSIFIED,
+                                                                        DocumentStatus.EXTRACTED)
+                                                                .flatMap(r -> handleMismatch(r, record,
+                                                                        DocumentStatus.EXTRACTED))
 
-                                                        boolean fieldsIncomplete = extractedFields == null
-                                                                || extractedFields.isBlank()
-                                                                || "{}".equals(extractedFields);
+                                                                // ── Step 6: Quyết định VALIDATED vs NEEDS_REVIEW
+                                                                .flatMap(ignored4 -> {
+                                                                    boolean lowConfidence =
+                                                                            classifyResult.getConfidenceScore() == null
+                                                                                    || classifyResult.getConfidenceScore() < 0.90;
+                                                                    boolean fieldsIncomplete =
+                                                                            extractedFields == null
+                                                                                    || extractedFields.isBlank()
+                                                                                    || "{}".equals(extractedFields);
 
-                                                        // Nếu AI nhận diện yếu, thiếu field, HOẶC không tìm thấy công ty -> Needs Review
-                                                        if (usedAiFallback || lowConfidence || fieldsIncomplete || !companyInfo.isFound()) {
-                                                            record.setStatus("NEEDS_REVIEW");
-                                                        } else {
-                                                            record.setStatus("COMPLETED");
-                                                        }
-
-                                                        log.info("Document {}: type={}, matchedBy={}, confidence={}, status={}",
-                                                                record.getId(),
-                                                                record.getDocumentType(),
-                                                                record.getMatchedBy(),
-                                                                record.getConfidenceScore(),
-                                                                record.getStatus());
-
-                                                        return record;
+                                                                    if (usedAiFallback || lowConfidence
+                                                                            || fieldsIncomplete
+                                                                            || !companyInfo.isFound()) {
+                                                                        // → NEEDS_REVIEW
+                                                                        return stateMachine.transition(
+                                                                                record.getId(),
+                                                                                DocumentStatus.EXTRACTED,
+                                                                                DocumentStatus.NEEDS_REVIEW)
+                                                                                .flatMap(r -> handleMismatch(r,
+                                                                                        record,
+                                                                                        DocumentStatus.NEEDS_REVIEW))
+                                                                                .flatMap(ignored5 -> {
+                                                                                    record.setStatus(DocumentStatus.NEEDS_REVIEW.name());
+                                                                                    return persistRecord(record);
+                                                                                });
+                                                                    } else {
+                                                                        // → VALIDATED → (APPROVED chờ reviewer)
+                                                                        return stateMachine.transition(
+                                                                                record.getId(),
+                                                                                DocumentStatus.EXTRACTED,
+                                                                                DocumentStatus.VALIDATED)
+                                                                                .flatMap(r -> handleMismatch(r,
+                                                                                        record,
+                                                                                        DocumentStatus.VALIDATED))
+                                                                                .flatMap(ignored5 -> {
+                                                                                    record.setStatus(DocumentStatus.VALIDATED.name());
+                                                                                    return persistRecord(record);
+                                                                                });
+                                                                    }
+                                                                });
                                                     });
                                         });
                             });
                 })
-                .flatMap(documentRepository::save)
                 .onErrorResume(error -> {
-                    log.error("Pipeline thất bại cho document ID {}", record.getId(), error);
-                    record.setStatus("FAILED");
-                    return documentRepository.save(record)
-                            .onErrorResume(saveError -> {
-                                log.error("Không thể cập nhật trạng thái FAILED cho document ID {}", record.getId(), saveError);
-                                return Mono.just(record);
+                    log.error("[Pipeline] Lỗi kỹ thuật cho documentId={}", record.getId(), error);
+                    return stateMachine.forceMarkFailed(record.getId(), record.getStatus())
+                            .doOnNext(rows -> {
+                                if (rows == 0) {
+                                    log.warn("[Pipeline] forceMarkFailed không update được row nào " +
+                                            "cho documentId={} (có thể đã FAILED rồi)", record.getId());
+                                }
                             })
-                            // Đã lưu status FAILED vào DB, nhưng vẫn phải "ném" lại lỗi gốc để
-                            // OcrQueueConsumer nhận biết đây là job thất bại (log đúng, đẩy vào DLQ)
-                            // thay vì bị coi là một luồng thành công bình thường.
                             .then(Mono.error(error));
                 });
     }
 
-    // Hàm tiện ích: Đánh dấu file lỗi nếu có sự cố
-    private Mono<Document> markAsFailed(Document record) {
-        record.setStatus("FAILED");
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    /**
+     * Xử lý kết quả transition:
+     * <ul>
+     *   <li>SUCCESS → tiếp tục bình thường</li>
+     *   <li>IDEMPOTENT → log warn + tiếp tục (retry an toàn)</li>
+     *   <li>MISMATCH → ném lỗi, dừng pipeline</li>
+     * </ul>
+     */
+    private Mono<Void> handleMismatch(TransitionResult result, Document record,
+                                      DocumentStatus expectedTarget) {
+        return switch (result) {
+            case SUCCESS -> Mono.empty();
+            case IDEMPOTENT -> {
+                log.warn("[Pipeline] documentId={} đã ở {} (idempotent, bỏ qua)",
+                        record.getId(), expectedTarget);
+                yield Mono.empty();
+            }
+            case MISMATCH -> Mono.error(new DocumentStateMachine.IllegalStateTransitionException(
+                    String.format("documentId=%d state mismatch khi chuyển sang %s — dừng pipeline",
+                            record.getId(), expectedTarget)));
+        };
+    }
+
+    /** Lưu snapshot field xuống DB (không đổi status) */
+    private Mono<Document> persistRecord(Document record) {
+        log.info("[Pipeline] documentId={} type={} matchedBy={} confidence={} status={}",
+                record.getId(), record.getDocumentType(), record.getMatchedBy(),
+                record.getConfidenceScore(), record.getStatus());
         return documentRepository.save(record);
+    }
+
+    /** Ép FAILED và propagate lỗi ra ngoài (dùng trong onErrorResume đơn giản) */
+    private Mono<Document> forceFailAndError(Document record, String reason) {
+        log.error("[Pipeline] documentId={} → FAILED: {}", record.getId(), reason);
+        record.setStatus(DocumentStatus.FAILED.name());
+        return documentRepository.save(record)
+                .then(Mono.error(new IllegalStateException(reason)));
     }
 }

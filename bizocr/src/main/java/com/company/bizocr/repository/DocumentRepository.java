@@ -1,12 +1,48 @@
 package com.company.bizocr.repository;
 
 import com.company.bizocr.model.entity.Document;
+import org.springframework.data.r2dbc.repository.Modifying;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public interface DocumentRepository extends ReactiveCrudRepository<Document, Long> {
+
+    // =========================================================================
+    // FSM — Conditional UPDATE (trả về số row bị ảnh hưởng)
+    // =========================================================================
+
+    /**
+     * Chuyển trạng thái document theo kiểu optimistic-lock:
+     * chỉ UPDATE khi status hiện tại trong DB đúng bằng {@code fromStatus}.
+     *
+     * <p>Trả về:
+     * <ul>
+     *   <li>{@code 1} — chuyển trạng thái thành công</li>
+     *   <li>{@code 0} — document không ở trạng thái {@code fromStatus} (idempotent hoặc mismatch)</li>
+     * </ul>
+     *
+     * @param id         ID document
+     * @param fromStatus trạng thái mong đợi (điều kiện WHERE)
+     * @param toStatus   trạng thái đích
+     */
+    @Modifying
+    @Query("UPDATE documents SET status = :toStatus WHERE id = :id AND status = :fromStatus")
+    Mono<Integer> updateStatusIfMatch(Long id, String fromStatus, String toStatus);
+
+    /**
+     * Buộc cập nhật trạng thái bất kể trạng thái hiện tại (dùng cho emergency FAILED).
+     * Không đi qua bảng FSM — chỉ dùng trong {@code onErrorResume}.
+     *
+     * @param id     ID document
+     * @param status trạng thái mới (thường là "FAILED")
+     */
+    @Modifying
+    @Query("UPDATE documents SET status = :status WHERE id = :id")
+    Mono<Integer> updateStatusForced(Long id, String status);
+
+
 
     @Query("SELECT * FROM documents WHERE company_id = :companyId AND " +
             "(:status IS NULL OR status = :status) AND " +

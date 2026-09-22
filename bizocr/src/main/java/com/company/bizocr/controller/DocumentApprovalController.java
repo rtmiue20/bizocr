@@ -33,17 +33,18 @@ public class DocumentApprovalController {
                         HttpStatus.UNAUTHORIZED, "Truy cập bị từ chối: Không tìm thấy thông tin xác thực"
                 )))
                 // FIX: Chặn đứng lỗi IDOR nếu user hợp lệ nhưng không được gán companyId
-                .flatMap(currentUser -> currentUser.companyId() != null
-                                ? Mono.just(currentUser.companyId())
-                                : Mono.error(new ResponseStatusException(
+                .flatMap(currentUser -> currentUser.companyId() == null
+                                ? Mono.error(new ResponseStatusException(
                                 HttpStatus.FORBIDDEN, "Token thiếu claim companyId, không thể xác định quyền truy cập dữ liệu."
                         ))
+                                // Giữ currentUser trong closure để truyền tiếp xuống service làm reviewedBy,
+                                // không resolve lại lần 2 và không đi qua request body.
+                                : documentRepository.findByIdAndOwnerCompanyId(documentId, currentUser.companyId())
+                                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                                        HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hợp lệ để duyệt hoặc bạn không có quyền."
+                                )))
+                                .flatMap(doc -> documentApprovalService.approveDocument(documentId, request, currentUser))
                 )
-                .flatMap(companyId -> documentRepository.findByIdAndOwnerCompanyId(documentId, companyId))
-                .switchIfEmpty(Mono.error(new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hợp lệ để duyệt hoặc bạn không có quyền."
-                )))
-                .flatMap(doc -> documentApprovalService.approveDocument(documentId, request))
                 .map(ResponseEntity::ok);
     }
 }

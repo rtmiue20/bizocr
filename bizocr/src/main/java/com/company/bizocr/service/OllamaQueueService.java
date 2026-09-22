@@ -81,7 +81,7 @@ public class OllamaQueueService implements SmartLifecycle {
         stopWorker();
     }
 
-    @Override
+@Override
     public void stop(Runnable callback) {
         stop();
         callback.run();

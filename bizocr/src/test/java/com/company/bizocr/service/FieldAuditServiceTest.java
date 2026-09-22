@@ -16,6 +16,8 @@ package com.company.bizocr.service;
 import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.model.entity.FieldCorrectionAudit;
 import com.company.bizocr.repository.FieldCorrectionAuditRepository;
+import com.company.bizocr.security.CurrentUser;
+import com.company.bizocr.security.CurrentUserResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,12 +28,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyIterable;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -42,13 +46,20 @@ class FieldAuditServiceTest {
     @Mock
     private FieldCorrectionAuditRepository auditRepository;
 
+    @Mock
+    private CurrentUserResolver currentUserResolver;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private FieldAuditService service;
 
     @BeforeEach
     void setUp() {
-        service = new FieldAuditService(auditRepository, objectMapper);
+        service = new FieldAuditService(auditRepository, objectMapper, currentUserResolver);
+        // lenient(): 2 test "bỏ qua hoàn toàn" (null/blank JSON) return sớm, không gọi tới
+        // currentUserResolver -> nếu stub strict sẽ bị UnnecessaryStubbingException.
+        lenient().when(currentUserResolver.getCurrentUser())
+                .thenReturn(Mono.just(new CurrentUser("minh", List.of("REVIEWER"), 10L)));
     }
 
     private Document buildDoc(Long id, Long ownerCompanyId, Long companyId, String extractedFields) {
@@ -77,7 +88,7 @@ class FieldAuditServiceTest {
         void nullJson_shouldSkipAudit() {
             Document doc = buildDoc(1L, 10L, null, "{}");
 
-            StepVerifier.create(service.logFieldCorrections(doc, null, "reviewer"))
+            StepVerifier.create(service.logFieldCorrections(doc, null))
                     .verifyComplete();
 
             verifyNoInteractions(auditRepository);
@@ -88,7 +99,7 @@ class FieldAuditServiceTest {
         void blankJson_shouldSkipAudit() {
             Document doc = buildDoc(1L, 10L, null, "{}");
 
-            StepVerifier.create(service.logFieldCorrections(doc, "   ", "reviewer"))
+            StepVerifier.create(service.logFieldCorrections(doc, "   "))
                     .verifyComplete();
 
             verifyNoInteractions(auditRepository);
@@ -101,7 +112,7 @@ class FieldAuditServiceTest {
             Document doc = buildDoc(1L, 10L, null, json);
             when(auditRepository.saveAll(anyIterable())).thenReturn(Flux.empty());
 
-            StepVerifier.create(service.logFieldCorrections(doc, json, "reviewer"))
+            StepVerifier.create(service.logFieldCorrections(doc, json))
                     .verifyComplete();
 
             ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
@@ -126,7 +137,7 @@ class FieldAuditServiceTest {
             when(auditRepository.saveAll(anyIterable()))
                     .thenAnswer(inv -> Flux.fromIterable((Iterable<FieldCorrectionAudit>) inv.getArgument(0)));
 
-            StepVerifier.create(service.logFieldCorrections(doc, newJson, "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, newJson))
                     .verifyComplete();
 
             ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
@@ -154,7 +165,7 @@ class FieldAuditServiceTest {
             when(auditRepository.saveAll(anyIterable()))
                     .thenAnswer(inv -> Flux.fromIterable((Iterable<FieldCorrectionAudit>) inv.getArgument(0)));
 
-            StepVerifier.create(service.logFieldCorrections(doc, newJson, "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, newJson))
                     .verifyComplete();
 
             ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
@@ -176,7 +187,7 @@ class FieldAuditServiceTest {
             when(auditRepository.saveAll(anyIterable()))
                     .thenAnswer(inv -> Flux.fromIterable((Iterable<FieldCorrectionAudit>) inv.getArgument(0)));
 
-            StepVerifier.create(service.logFieldCorrections(doc, newJson, "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, newJson))
                     .verifyComplete();
 
             ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
@@ -197,7 +208,7 @@ class FieldAuditServiceTest {
             when(auditRepository.saveAll(anyIterable()))
                     .thenAnswer(inv -> Flux.fromIterable((Iterable<FieldCorrectionAudit>) inv.getArgument(0)));
 
-            StepVerifier.create(service.logFieldCorrections(doc, newJson, "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, newJson))
                     .verifyComplete();
 
             ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
@@ -219,7 +230,7 @@ class FieldAuditServiceTest {
             when(auditRepository.saveAll(anyIterable()))
                     .thenAnswer(inv -> Flux.fromIterable((Iterable<FieldCorrectionAudit>) inv.getArgument(0)));
 
-            StepVerifier.create(service.logFieldCorrections(doc, newJson, "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, newJson))
                     .verifyComplete();
 
             ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
@@ -239,7 +250,7 @@ class FieldAuditServiceTest {
             when(auditRepository.saveAll(anyIterable()))
                     .thenAnswer(inv -> Flux.fromIterable((Iterable<FieldCorrectionAudit>) inv.getArgument(0)));
 
-            StepVerifier.create(service.logFieldCorrections(doc, newJson, "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, newJson))
                     .verifyComplete();
 
             ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
@@ -266,7 +277,7 @@ class FieldAuditServiceTest {
             Document doc = buildDoc(6L, 10L, null, oldJson);
             when(auditRepository.saveAll(anyIterable())).thenReturn(Flux.empty());
 
-            StepVerifier.create(service.logFieldCorrections(doc, newJson, "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, newJson))
                     .verifyComplete();
 
             ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
@@ -282,7 +293,7 @@ class FieldAuditServiceTest {
             Document doc = buildDoc(7L, 10L, null, oldJson);
             when(auditRepository.saveAll(anyIterable())).thenReturn(Flux.empty());
 
-            StepVerifier.create(service.logFieldCorrections(doc, newJson, "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, newJson))
                     .verifyComplete();
 
             ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
@@ -299,7 +310,7 @@ class FieldAuditServiceTest {
             when(auditRepository.saveAll(anyIterable()))
                     .thenAnswer(inv -> Flux.fromIterable((Iterable<FieldCorrectionAudit>) inv.getArgument(0)));
 
-            StepVerifier.create(service.logFieldCorrections(doc, newJson, "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, newJson))
                     .verifyComplete();
 
             ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
@@ -323,7 +334,7 @@ class FieldAuditServiceTest {
         void invalidNewJson_shouldPropagateError_withoutTouchingRepository() {
             Document doc = buildDoc(1L, 10L, null, "{}");
 
-            StepVerifier.create(service.logFieldCorrections(doc, "khong-phai-json", "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, "khong-phai-json"))
                     .expectError()
                     .verify();
 
@@ -336,7 +347,7 @@ class FieldAuditServiceTest {
             // Trường hợp dữ liệu cũ trong DB đã bị hỏng (vd do lỗi index.html như đã gặp trước đó)
             Document doc = buildDoc(1L, 10L, null, "{khong-hop-le");
 
-            StepVerifier.create(service.logFieldCorrections(doc, "{\"party_a\":\"A\"}", "minh"))
+            StepVerifier.create(service.logFieldCorrections(doc, "{\"party_a\":\"A\"}"))
                     .expectError()
                     .verify();
 
