@@ -54,6 +54,9 @@ bizocr:
   classification:
     ai-confidence-threshold: 0.80
 
+  validator:
+    shadow-mode: ${VALIDATOR_SHADOW_MODE:true}
+
   ollama:
     auto-manage: true      # true = Spring Boot tự quản lý Ollama process
     force-cpu: true         # true = ép CPU-only

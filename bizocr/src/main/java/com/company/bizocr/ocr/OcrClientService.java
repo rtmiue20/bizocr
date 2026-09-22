@@ -97,11 +97,18 @@ public class OcrClientService {
                 .timeout(OCR_TIMEOUT)
                 .doOnSuccess(result ->
                         log.info(
-                                "OCR service trả kết quả thành công, file={}, rawTextLength={}",
+                                "OCR service trả kết quả thành công, file={}, rawTextLength={}, "
+                                        + "contourAreaRatio={}, aspectRatioAfterCrop={}, "
+                                        + "qualityMode={}, qualityPassed={}, qualityReasons={}",
                                 filename,
                                 result.getRawText() == null
                                         ? 0
-                                        : result.getRawText().length()
+                                        : result.getRawText().length(),
+                                result.getContourAreaRatio(),
+                                result.getAspectRatioAfterCrop(),
+                                result.getQualityMode(),
+                                result.getQualityPassed(),
+                                result.getQualityReasons()
                         )
                 )
                 .doOnError(error ->

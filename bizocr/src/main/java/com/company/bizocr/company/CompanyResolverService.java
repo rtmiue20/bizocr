@@ -16,8 +16,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -66,7 +64,7 @@ public class CompanyResolverService {
                     .findByTaxCode(taxCode)
                     .filter(this::isActive)
                     .map(company -> toCompanyInfo(company, 1.0, "TAX_CODE"))
-                    .switchIfEmpty(resolveByCompanyCodeOrName(rawText));
+                    .switchIfEmpty(Mono.defer(() -> resolveByCompanyCodeOrName(rawText)));
         }
         return resolveByCompanyCodeOrName(rawText);
     }
@@ -78,7 +76,7 @@ public class CompanyResolverService {
                     .findByCompanyCode(companyCode)
                     .filter(this::isActive)
                     .map(company -> toCompanyInfo(company, 1.0, "COMPANY_CODE"))
-                    .switchIfEmpty(resolveByName(rawText));
+                    .switchIfEmpty(Mono.defer(() -> resolveByName(rawText)));
         }
         return resolveByName(rawText);
     }
@@ -119,16 +117,13 @@ public class CompanyResolverService {
 
         log.info("[CompanyResolver] Không có MST. Fallback tìm MST qua External Search cho: {}", companyName);
 
-        // Encode URL an toàn để tránh Network Error / Bad Request do tiếng Việt
-        String safeQuery = URLEncoder.encode("Mã số thuế " + companyName, StandardCharsets.UTF_8);
-
-        return externalTaxSearchService.searchTaxCodeOnline(safeQuery, null)
+        return externalTaxSearchService.searchTaxCodeOnline(companyName, null)
                 .onErrorResume(e -> {
                     log.warn("[CompanyResolver] External Search bị lỗi mạng/timeout: {}", e.getMessage());
                     return Mono.empty();
                 })
                 .flatMap(searchedTaxCode -> {
-                    log.info("[CompanyResolver] Đã tìm thấy MST qua Google Search: {}", searchedTaxCode);
+                    log.info("[CompanyResolver] Đã tìm thấy MST qua Search: {}", searchedTaxCode);
                     return callTaxApiAndSave(searchedTaxCode, companyName, rawText, normalizedName, CompanyVerificationSource.WEB_SEARCH_VIETQR);
                 })
                 .switchIfEmpty(Mono.defer(() -> createUnverified(companyName, normalizedName)));
@@ -151,9 +146,13 @@ public class CompanyResolverService {
                 .defaultIfEmpty(Company.builder().active(true).createdAt(LocalDateTime.now().toString()).build())
                 .flatMap(company -> {
                     company.setTaxCode(normalizedTaxCode);
-                    company.setLegalName(taxLookup.getLegalName());
-                    company.setNormalizedName(nameNormalizer.normalize(taxLookup.getLegalName()));
-                    company.setAddress(taxLookup.getAddress());
+                    if (taxLookup.getLegalName() != null && !taxLookup.getLegalName().isBlank()) {
+                        company.setLegalName(taxLookup.getLegalName());
+                        company.setNormalizedName(nameNormalizer.normalize(taxLookup.getLegalName()));
+                    }
+                    if (taxLookup.getAddress() != null && !taxLookup.getAddress().isBlank()) {
+                        company.setAddress(taxLookup.getAddress());
+                    }
                     company.setActive(true);
                     company.setVerificationStatus(CompanyVerificationStatus.VERIFIED);
                     company.setVerificationSource(source);

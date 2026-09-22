@@ -304,7 +304,8 @@ public class FieldExtractorService {
                 return extractionValidatorService
                         .validateAndSanitize(
                                 documentType,
-                                normalizedJson
+                                normalizedJson,
+                                rawText
                         );
             }
 

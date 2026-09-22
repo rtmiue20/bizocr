@@ -9,6 +9,7 @@ import com.company.bizocr.ocr.OcrClientService;
 import com.company.bizocr.repository.DocumentRepository;
 import com.company.bizocr.statemachine.DocumentStateMachine;
 import com.company.bizocr.statemachine.DocumentStateMachine.TransitionResult;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -160,9 +161,22 @@ public class PipelineOrchestrator {
                                                                                     || extractedFields.isBlank()
                                                                                     || "{}".equals(extractedFields);
 
+                                                                    boolean hasValidationReviewRequirement = false;
+                                                                    if (extractedFields != null && !extractedFields.isBlank()) {
+                                                                        try {
+                                                                            JsonNode jsonTree = objectMapper.readTree(extractedFields);
+                                                                            if (jsonTree.has("review_status") &&
+                                                                                    "PENDING_REVIEW".equalsIgnoreCase(jsonTree.get("review_status").asText())) {
+                                                                                hasValidationReviewRequirement = true;
+                                                                            }
+                                                                        } catch (Exception ignored) {
+                                                                        }
+                                                                    }
+
                                                                     if (usedAiFallback || lowConfidence
                                                                             || fieldsIncomplete
-                                                                            || !companyInfo.isFound()) {
+                                                                            || !companyInfo.isFound()
+                                                                            || hasValidationReviewRequirement) {
                                                                         // → NEEDS_REVIEW
                                                                         return stateMachine.transition(
                                                                                 record.getId(),

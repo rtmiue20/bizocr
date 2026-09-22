@@ -28,6 +28,7 @@ class CandidateFilterAndExtractorTest {
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
         objectMapper = new ObjectMapper();
         extractionValidatorService = new ExtractionValidatorService(validator, objectMapper);
+        extractionValidatorService.setShadowMode(false);
     }
 
     @Test
@@ -94,8 +95,8 @@ class CandidateFilterAndExtractorTest {
     @Test
     @DisplayName("ExtractionValidatorService - Hỗ trợ và validate tất cả các loại document type và bỏ qua unknown properties")
     void testExtractionValidatorAllDocTypes() {
-        // 1. VAT_INVOICE với unknown properties và MST 13 số liền (không gạch ngang)
-        String vatJson = "{\"tax_code\":\"0166412776001\",\"total_amount\":500000.0,\"email\":\"test@bizocr.vn\",\"website\":\"www.bizocr.vn\"}";
+        // 1. VAT_INVOICE với unknown properties và MST 13 số hợp lệ check-digit
+        String vatJson = "{\"tax_code\":\"0100109106001\",\"total_amount\":500000.0,\"email\":\"test@bizocr.vn\",\"website\":\"www.bizocr.vn\"}";
         String validatedVat = extractionValidatorService.validateAndSanitize("VAT_INVOICE", vatJson);
         assertTrue(validatedVat.contains("AUTO_APPROVED"));
 
