@@ -88,7 +88,7 @@ public class PipelineOrchestrator {
                 .flatMap(result -> handleMismatch(result, record, DocumentStatus.PROCESSING))
 
                 // ── Step 1: Gọi OCR engine ────────────────────────────────────
-                .flatMap(ignored -> ocrResultMono)
+                .then(ocrResultMono)
                 .flatMap(ocrResult -> {
                     String rawText = ocrResult.getRawText();
                     record.setRawOcrText(rawText);
@@ -104,7 +104,7 @@ public class PipelineOrchestrator {
                             .flatMap(r -> handleMismatch(r, record, DocumentStatus.OCR_DONE))
 
                             // ── Step 3: Đối chiếu công ty (không đổi trạng thái) ─
-                            .flatMap(ignored2 -> companyResolverService.resolve(rawText))
+                            .then(companyResolverService.resolve(rawText))
                             .flatMap(companyInfo -> {
                                 if (companyInfo.isFound()) {
                                     log.info("[Pipeline] Matched công ty: {} score={}",
@@ -132,7 +132,7 @@ public class PipelineOrchestrator {
                                                     .flatMap(r -> handleMismatch(r, record, DocumentStatus.CLASSIFIED))
 
                                                     // ── Step 5: CLASSIFIED → EXTRACTED ──────
-                                                    .flatMap(ignored3 -> {
+                                                    .then(Mono.defer(() -> {
                                                         String docId = record.getId() != null
                                                                 ? String.valueOf(record.getId()) : null;
                                                         Mono<String> extractMono = docId != null
@@ -148,11 +148,10 @@ public class PipelineOrchestrator {
                                                         return stateMachine.transition(record.getId(),
                                                                         DocumentStatus.CLASSIFIED,
                                                                         DocumentStatus.EXTRACTED)
-                                                                .flatMap(r -> handleMismatch(r, record,
-                                                                        DocumentStatus.EXTRACTED))
+                                                                .flatMap(r -> handleMismatch(r, record, DocumentStatus.EXTRACTED))
 
                                                                 // ── Step 6: Quyết định VALIDATED vs NEEDS_REVIEW
-                                                                .flatMap(ignored4 -> {
+                                                                .then(Mono.defer(() -> {
                                                                     boolean lowConfidence =
                                                                             classifyResult.getConfidenceScore() == null
                                                                                     || classifyResult.getConfidenceScore() < 0.90;
@@ -182,13 +181,11 @@ public class PipelineOrchestrator {
                                                                                 record.getId(),
                                                                                 DocumentStatus.EXTRACTED,
                                                                                 DocumentStatus.NEEDS_REVIEW)
-                                                                                .flatMap(r -> handleMismatch(r,
-                                                                                        record,
-                                                                                        DocumentStatus.NEEDS_REVIEW))
-                                                                                .flatMap(ignored5 -> {
+                                                                                .flatMap(r -> handleMismatch(r, record, DocumentStatus.NEEDS_REVIEW))
+                                                                                .then(Mono.defer(() -> {
                                                                                     record.setStatus(DocumentStatus.NEEDS_REVIEW.name());
                                                                                     return persistRecord(record);
-                                                                                });
+                                                                                }));
                                                                     } else {
                                                                         // → VALIDATED → (APPROVED chờ reviewer)
                                                                         return stateMachine.transition(
@@ -198,13 +195,13 @@ public class PipelineOrchestrator {
                                                                                 .flatMap(r -> handleMismatch(r,
                                                                                         record,
                                                                                         DocumentStatus.VALIDATED))
-                                                                                .flatMap(ignored5 -> {
+                                                                                .then(Mono.defer(() -> {
                                                                                     record.setStatus(DocumentStatus.VALIDATED.name());
                                                                                     return persistRecord(record);
-                                                                                });
+                                                                                }));
                                                                     }
-                                                                });
-                                                    });
+                                                                }));
+                                                    }));
                                         });
                             });
                 })

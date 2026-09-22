@@ -151,21 +151,53 @@ public class OllamaQueueService implements SmartLifecycle {
         if (!isRunning.get()) {
             return Mono.empty();
         }
-        return Mono.<Void>fromCallable(() -> {
-                    if (!isRunning.get()) return null;
-                    String jsonPayload = redisTemplate.opsForList().rightPop(QUEUE_NAME);
-                    if (jsonPayload == null) return null;
 
-                    OllamaTaskPayload task = objectMapper.readValue(jsonPayload, OllamaTaskPayload.class);
-                    log.info(">> [Ollama Worker] Bắt đầu xử lý AI cho DocID: {}", task.getDocumentId());
+        // 1. Pop task từ Redis
+        return Mono.fromCallable(() -> redisTemplate.opsForList().rightPop(QUEUE_NAME))
+                // 2. Nếu có task và service đang chạy thì đi tiếp
+                .filter(jsonPayload -> jsonPayload != null && isRunning.get())
+                // 3. Xử lý logic
+                .flatMap(jsonPayload -> {
+                    try {
+                        OllamaTaskPayload task = objectMapper.readValue(jsonPayload, OllamaTaskPayload.class);
+                        log.info(">> [Ollama Worker] Bắt đầu xử lý AI cho DocID: {}", task.getDocumentId());
 
-                    String rawJsonResult = callOllamaSync(task.getDocumentType(), task.getRawText());
-                    String finalValidatedJson = extractionValidatorService.validateAndSanitize(task.getDocumentType(), rawJsonResult);
+                        String rawJsonResult = callOllamaSync(task.getDocumentType(), task.getRawText());
+                        String finalValidatedJson = extractionValidatorService.validateAndSanitize(task.getDocumentType(), rawJsonResult);
 
-                    log.info(">> [Ollama Worker] Hoàn tất bóc tách AI cho DocID: {}. Result: {}", task.getDocumentId(), finalValidatedJson);
-                    return null;
+                        log.info(">> [Ollama Worker] Hoàn tất bóc tách AI cho DocID: {}. Result: {}", task.getDocumentId(), finalValidatedJson);
+
+                        Long docId = Long.valueOf(task.getDocumentId());
+
+                        // 4. Luồng Reactive DB: Gọi findById -> Cập nhật entity -> Gọi save
+                        return documentRepository.findById(docId)
+                                .flatMap(doc -> {
+                                    doc.setExtractedFields(finalValidatedJson);
+
+                                    try {
+                                        var rootNode = objectMapper.readTree(finalValidatedJson);
+                                        if (rootNode.has("name") && !rootNode.get("name").isNull()) {
+                                            doc.setContactName(rootNode.get("name").asText());
+                                        }
+                                        if (rootNode.has("title") && !rootNode.get("title").isNull()) {
+                                            doc.setContactTitle(rootNode.get("title").asText());
+                                        }
+                                    } catch (Exception ex) {
+                                        log.warn(">> [Ollama Worker] Lỗi parse JSON map field cho DocID: {}", docId);
+                                    }
+
+                                    // Return lệnh lưu DB vào luồng chính
+                                    return documentRepository.save(doc);
+                                })
+                                .doOnSuccess(saved -> log.info(">> [Ollama Worker] Đã cập nhật kết quả vào DB cho DocID: {}", docId))
+                                // Chuyển kết quả cuối cùng về Mono<Void> để khớp với processNextTask()
+                                .then();
+
+                    } catch (Exception e) {
+                        return Mono.error(e);
+                    }
                 })
-                // Hứng lỗi của từng task độc lập
+                // Hứng lỗi riêng lẻ không làm sập Worker
                 .onErrorResume(error -> {
                     log.error(">> [Ollama Worker] Lỗi khi xử lý 1 task cụ thể, nuốt lỗi để worker tiếp tục chạy:", error);
                     return Mono.empty();
@@ -174,21 +206,103 @@ public class OllamaQueueService implements SmartLifecycle {
 
     private String callOllamaSync(String documentType, String rawText) {
         try {
+            String jsonTemplate = getJsonTemplateForDocument(documentType);
+
             String promptText = """
-            Bạn là chuyên gia trích xuất dữ liệu chứng từ kế toán Việt Nam.
-            Loại chứng từ: %s
-            Văn bản OCR RawText:
-            \"\"\"
-            %s
-            \"\"\"
-            Trả về DUY NHẤT một chuỗi JSON hợp lệ, không kèm Markdown codeblock, không giải thích.
-            """.formatted(documentType, rawText);
+                    [TASK]
+                    Trích xuất thông tin cốt lõi từ văn bản OCR thô và điền chính xác vào khung JSON mẫu.
+                    
+                    [CONTEXT]
+                    Bạn là chuyên gia AI bóc tách chứng từ, hóa đơn và danh thiếp Việt Nam. Văn bản OCR đầu vào thường chứa nhiều nhiễu, câu chữ rác (quảng cáo, slogan), lỗi xuống dòng và bị khuyết dữ liệu.
+                    
+                    [REFERENCE]
+                    Khung JSON mẫu bắt buộc dùng làm mốc đối chiếu:
+                    %s
+                    
+                    [EVALUATION / EXPECTED OUTPUT]
+                    1. Trả về DUY NHẤT một chuỗi JSON hợp lệ.
+                    2. KHÔNG bọc trong Markdown codeblock (```json).
+                    3. KHÔNG chứa lời chào, giải thích hay bất kỳ văn bản nào khác ngoài JSON.
+                    4. Bắt buộc sử dụng đúng 100%% tên key từ khung mẫu tại [REFERENCE].
+                    
+                    [ITERATE / REFINEMENT INSTRUCTIONS]
+                    - Bước 1 (Lọc rác): Quét văn bản OCR và chủ động loại bỏ các từ rác/slogan (vd: "Cloud", "Server", "Free Shipping", "Mẫu số...").
+                    - Bước 2 (Khớp dữ liệu): Đối chiếu từng thông tin tìm thấy với các key tương ứng trong khung [REFERENCE].
+                    - Bước 3 (Xử lý khuyết): Nếu một key không có dữ liệu trong văn bản, BẮT BUỘC gán giá trị key đó là null (không tự bịa hay suy diễn).
+                    - Bước 4 (Tự kiểm định): Rà soát lại JSON lần cuối, nếu phát hiện key rác hoặc key bị đổi tên ngoài khung [REFERENCE], hãy loại bỏ và đưa về đúng chuẩn trước khi xuất kết quả.
+                    
+                    [INPUT]
+                    - Loại chứng từ: %s
+                    - Văn bản OCR (RawText):
+                    \"\"\"
+                    %s
+                    \"\"\"
+                    """.formatted(jsonTemplate, documentType, rawText);
 
             String response = chatClient.prompt().user(promptText).call().content();
-            return response.replaceAll("```json", "").replaceAll("```", "").trim();
+
+            // Làm sạch chuỗi trả về
+            return response.replaceAll("(?s)```json\\s*", "")
+                    .replaceAll("(?s)```\\s*", "")
+                    .trim();
         } catch (Exception e) {
             log.error(">> [Ollama Engine] Lỗi khi gọi Ollama", e);
             return "{\"error\":\"ollama_processing_failed\"}";
         }
+    }
+
+    /**
+     * Trả về khung JSON mẫu phù hợp theo loại chứng từ.
+     * Nếu là loại chứng từ lạ/chưa định nghĩa, dùng Khung Mẫu Tổng Quát.
+     */
+    private String getJsonTemplateForDocument(String documentType) {
+        if (documentType == null) {
+            documentType = "";
+        }
+
+        return switch (documentType.toUpperCase()) {
+            case "NAME_CARD", "DANH_THIEP" -> """
+        {
+          "name": "Họ và tên",
+          "title": "Chức danh / Chức vụ (ví dụ: Director, Manager...)",
+          "company": "Tên công ty / Tổ chức",
+          "phone": "Số điện thoại",
+          "email": "Địa chỉ Email",
+          "address": "Địa chỉ cơ quan / Văn phòng",
+          "website": "Trang web"
+        }
+        """;
+
+            case "INVOICE", "HOA_DON", "RECEIPT" -> """
+        {
+          "invoiceNumber": "Số hóa đơn / Số chứng từ",
+          "issueDate": "Ngày phát hành / Ngày lập",
+          "sellerName": "Đơn vị bán / Phía cung cấp",
+          "sellerTaxCode": "Mã số thuế bên bán",
+          "buyerName": "Đơn vị mua / Khách hàng",
+          "buyerTaxCode": "Mã số thuế bên mua",
+          "totalAmount": "Tổng tiền thanh toán",
+          "address": "Địa chỉ trên hóa đơn"
+        }
+        """;
+
+            // KHUNG MẪU TỔNG QUÁT: Cho mọi loại chứng từ / giấy tờ khác
+            default -> """
+        {
+          "documentTitle": "Tên loại chứng từ / Tiêu đề giấy tờ",
+          "documentNumber": "Số hiệu / Mã số chứng từ",
+          "issueDate": "Ngày tháng năm",
+          "issuerName": "Tên đơn vị / Cá nhân phát hành",
+          "taxCode": "Mã số thuế (nếu có)",
+          "personInCharge": "Họ tên người liên quan / Đại diện / Chức vụ",
+          "title": "Chức danh / Vị trí công tác (nếu có)",
+          "phoneNumber": "Số điện thoại liên hệ",
+          "email": "Email liên hệ",
+          "address": "Địa chỉ ghi trên chứng từ",
+          "totalAmount": "Số tiền / Giá trị (nếu có)",
+          "note": "Ghi chú / Nội dung chính"
+        }
+        """;
+        };
     }
 }

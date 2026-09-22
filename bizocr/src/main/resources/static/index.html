@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BizOCR — API Test Console</title>
+    <title>BizOCR — API Test Console & Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
@@ -20,6 +20,8 @@
             --warn: #e0a13c;
             --err: #d9614f;
             --review: #7c9ce8;
+            --info: #56b6c2;
+            --purple: #c678dd;
         }
         * { box-sizing: border-box; }
         html, body { margin:0; padding:0; height:100%; background:var(--bg); color:var(--text); font-family:'Inter',-apple-system,sans-serif; font-size:14px; }
@@ -28,82 +30,99 @@
         ::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
         ::-webkit-scrollbar-track { background:transparent; }
 
-        button { background:var(--accent); color:#1a1508; border:none; padding:9px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; font-family:inherit; transition:filter .12s, transform .05s; }
+        button { background:var(--accent); color:#1a1508; border:none; padding:9px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; font-family:inherit; transition:filter .12s, transform .05s; display:inline-flex; align-items:center; justify-content:center; gap:6px; }
         button:hover { filter:brightness(1.08); }
         button:active { transform:scale(.98); }
         button:disabled { opacity:.45; cursor:not-allowed; }
         button.secondary { background:transparent; color:var(--text); border:1px solid var(--border); }
         button.secondary:hover { background:var(--panel-2); }
+        button.danger { background:rgba(217,97,79,.2); color:var(--err); border:1px solid rgba(217,97,79,.4); }
+        button.danger:hover { background:rgba(217,97,79,.3); }
         button.small { padding:5px 10px; font-size:11.5px; }
 
         input, select, textarea { background:var(--bg); border:1px solid var(--border); color:var(--text); padding:8px 10px; border-radius:6px; font-size:13px; font-family:inherit; outline:none; width:100%; }
         textarea { font-family:'JetBrains Mono', monospace; font-size:12.5px; resize:vertical; }
         input:focus, select:focus, textarea:focus { border-color:var(--accent-dim); }
         input::placeholder, textarea::placeholder { color:#4a5268; }
-        label { font-size:12px; color:var(--muted); display:block; margin-bottom:5px; }
-        .field { margin-bottom:10px; }
+        label { font-size:12px; color:var(--muted); display:block; margin-bottom:5px; font-weight:500; }
+        .field { margin-bottom:12px; }
         .row { display:flex; gap:10px; flex-wrap:wrap; }
         .row > .field { flex:1; min-width:160px; }
 
         .card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:18px 20px; margin-bottom:16px; }
-        .card h3 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; margin:0 0 14px; }
+        .card h3 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; }
         .hint { font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.5; }
         .empty { color:var(--muted); font-size:13px; padding:24px 0; text-align:center; }
 
-        .badge { display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; }
-        .badge.PENDING { background:rgba(139,147,168,.15); color:var(--muted); }
-        .badge.PROCESSING { background:rgba(224,161,60,.15); color:var(--warn); }
-        .badge.COMPLETED { background:rgba(76,175,130,.15); color:var(--ok); }
-        .badge.APPROVED { background:rgba(76,175,130,.15); color:var(--ok); }
-        .badge.NEED_REVIEW { background:rgba(124,156,232,.15); color:var(--review); }
-        .badge.WARNING_ANOMALY { background:rgba(217,97,79,.15); color:var(--err); }
-        .badge.REJECTED { background:rgba(217,97,79,.15); color:var(--err); }
+        /* Status Badges */
+        .badge { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; font-family:'JetBrains Mono', monospace; }
+        .badge.PENDING { background:rgba(139,147,168,.18); color:var(--muted); }
+        .badge.PROCESSING { background:rgba(224,161,60,.18); color:var(--warn); }
+        .badge.OCR_DONE { background:rgba(86,182,194,.18); color:var(--info); }
+        .badge.CLASSIFIED { background:rgba(198,120,221,.18); color:var(--purple); }
+        .badge.EXTRACTED { background:rgba(124,156,232,.18); color:var(--review); }
+        .badge.VALIDATED { background:rgba(76,175,130,.18); color:var(--ok); }
+        .badge.NEEDS_REVIEW, .badge.NEED_REVIEW { background:rgba(224,161,60,.25); color:var(--warn); border:1px solid rgba(224,161,60,.4); }
+        .badge.APPROVED, .badge.COMPLETED { background:rgba(76,175,130,.2); color:var(--ok); border:1px solid rgba(76,175,130,.4); }
+        .badge.REJECTED_QUALITY, .badge.REJECTED, .badge.FAILED, .badge.WARNING_ANOMALY { background:rgba(217,97,79,.2); color:var(--err); border:1px solid rgba(217,97,79,.4); }
+
+        .tag-info { display:inline-block; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:500; background:var(--panel-2); border:1px solid var(--border); color:var(--muted); }
+        .tag-warn { display:inline-block; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:500; background:rgba(224,161,60,.15); border:1px solid rgba(224,161,60,.3); color:var(--warn); }
+        .tag-err { display:inline-block; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:500; background:rgba(217,97,79,.15); border:1px solid rgba(217,97,79,.3); color:var(--err); }
+        .tag-ok { display:inline-block; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:500; background:rgba(76,175,130,.15); border:1px solid rgba(76,175,130,.3); color:var(--ok); }
 
         .kv-table { width:100%; border-collapse:collapse; font-size:13px; }
         .kv-table td { padding:8px 6px; border-bottom:1px solid var(--border); }
-        .kv-table td:first-child { color:var(--muted); width:38%; }
+        .kv-table td:first-child { color:var(--muted); width:35%; }
         .kv-table td:last-child { font-family:'JetBrains Mono', monospace; word-break:break-all; }
+
+        /* Data table */
+        .data-table { width:100%; border-collapse:collapse; font-size:12.5px; }
+        .data-table th { text-align:left; padding:9px 8px; border-bottom:2px solid var(--border); color:var(--muted); font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; }
+        .data-table td { padding:8px 8px; border-bottom:1px solid var(--border); }
+        .data-table tr:hover td { background:var(--panel-2); cursor:pointer; }
 
         .step-tag { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--panel-2); border:1px solid var(--border); color:var(--accent); font-weight:700; font-size:11.5px; margin-right:8px; flex-shrink:0; }
 
         /* ---------------- LOGIN SCREEN ---------------- */
         .login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px 20px; }
-        .login-box { width:100%; max-width:620px; }
+        .login-box { width:100%; max-width:640px; }
         .login-brand { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
-        .login-brand .mark { width:12px; height:12px; border-radius:2px; background:var(--accent); transform:rotate(45deg); }
-        .login-brand h1 { font-size:20px; margin:0; font-weight:700; letter-spacing:-0.01em; }
-        .login-sub { color:var(--muted); font-size:13px; margin:0 0 26px; }
-        .login-result { margin-top:12px; }
-        .login-result .ok-text { color:var(--ok); font-size:13px; }
+        .login-brand .mark { width:14px; height:14px; border-radius:3px; background:var(--accent); transform:rotate(45deg); }
+        .login-brand h1 { font-size:22px; margin:0; font-weight:700; letter-spacing:-0.01em; }
+        .login-sub { color:var(--muted); font-size:13px; margin:0 0 24px; }
+        .login-result { margin-top:14px; }
+        .login-result .ok-text { color:var(--ok); font-size:13px; font-weight:500; }
         .login-result .err-text { color:var(--err); font-size:13px; }
-        .toggle-row { display:flex; gap:6px; margin-bottom:14px; }
-        .toggle-btn { flex:1; padding:8px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--muted); font-size:12.5px; cursor:pointer; }
-        .toggle-btn.active { background:var(--panel-2); color:var(--text); border-color:var(--accent-dim); }
+        .toggle-row { display:flex; gap:6px; margin-bottom:16px; }
+        .toggle-btn { flex:1; padding:8px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--muted); font-size:12.5px; cursor:pointer; text-align:center; }
+        .toggle-btn.active { background:var(--panel-2); color:var(--text); border-color:var(--accent-dim); font-weight:600; }
 
         /* ---------------- APP SHELL ---------------- */
-        .app { display:grid; grid-template-columns:230px 1fr 380px; height:100vh; }
+        .app { display:grid; grid-template-columns:240px 1fr 390px; height:100vh; }
         .sidebar { background:var(--panel); border-right:1px solid var(--border); padding:20px 14px; display:flex; flex-direction:column; }
         .brand { display:flex; align-items:baseline; gap:8px; margin-bottom:2px; }
         .brand .mark { width:10px; height:10px; border-radius:2px; background:var(--accent); transform:rotate(45deg); flex-shrink:0; }
         .brand h1 { font-size:16px; font-weight:700; margin:0; letter-spacing:-0.01em; }
-        .brand-sub { color:var(--muted); font-size:11.5px; margin:0 0 20px 18px; }
+        .brand-sub { color:var(--muted); font-size:11.5px; margin:0 0 16px 18px; }
 
-        .nav-item { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:6px; color:var(--muted); cursor:pointer; font-size:13px; font-weight:500; border:1px solid transparent; margin-bottom:2px; transition:background .12s, color .12s; }
+        .nav-category { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700; padding:10px 10px 4px; }
+        .nav-item { display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:6px; color:var(--muted); cursor:pointer; font-size:12.5px; font-weight:500; border:1px solid transparent; margin-bottom:2px; transition:background .12s, color .12s; }
         .nav-item:hover { background:var(--panel-2); color:var(--text); }
-        .nav-item.active { background:var(--panel-2); color:var(--text); border-color:var(--border); }
+        .nav-item.active { background:var(--panel-2); color:var(--text); border-color:var(--border); font-weight:600; }
         .nav-item .dot { width:6px; height:6px; border-radius:50%; background:var(--border); flex-shrink:0; }
         .nav-item.active .dot { background:var(--accent); }
 
         .sidebar-foot { margin-top:auto; padding-top:14px; border-top:1px solid var(--border); }
-        .who { font-size:12px; margin-bottom:4px; }
+        .who { font-size:12px; margin-bottom:4px; display:flex; justify-content:space-between; }
         .who .k { color:var(--muted); }
 
-        .main { padding:26px 32px; overflow-y:auto; }
-        .panel-title { font-size:19px; font-weight:700; margin:0 0 4px; letter-spacing:-0.01em; display:flex; align-items:center; }
-        .panel-desc { color:var(--muted); font-size:13px; margin:0 0 20px 30px; max-width:64ch; line-height:1.5; }
+        .main { padding:24px 30px; overflow-y:auto; }
+        .panel-title { font-size:18px; font-weight:700; margin:0 0 4px; letter-spacing:-0.01em; display:flex; align-items:center; }
+        .panel-desc { color:var(--muted); font-size:12.5px; margin:0 0 18px 30px; max-width:68ch; line-height:1.5; }
 
         .docid-bar { display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 14px; margin-bottom:20px; }
-        .docid-bar label { margin:0; white-space:nowrap; }
+        .docid-bar label { margin:0; white-space:nowrap; font-weight:600; font-size:12px; color:var(--accent); }
         .docid-bar input { font-family:'JetBrains Mono', monospace; }
 
         .drop-zone { border:1.5px dashed var(--border); border-radius:8px; padding:28px; text-align:center; color:var(--muted); font-size:13px; cursor:pointer; transition:border-color .15s, background .15s; }
@@ -111,19 +130,25 @@
         .drop-zone strong { color:var(--text); }
         .file-chip { display:inline-flex; align-items:center; gap:8px; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:12.5px; margin-top:10px; }
 
-        .lbody { background:var(--bg); border:1px solid var(--border); border-radius:5px; padding:10px; margin-top:6px; max-height:260px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; color:#c3cadd; font-size:11.5px; font-family:'JetBrains Mono', monospace; }
-        .preview-frame { width:100%; height:420px; border:1px solid var(--border); border-radius:8px; background:#000; }
-        .preview-img { max-width:100%; border-radius:8px; border:1px solid var(--border); }
+        .lbody { background:var(--bg); border:1px solid var(--border); border-radius:5px; padding:10px; margin-top:6px; max-height:280px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; color:#c3cadd; font-size:11.5px; font-family:'JetBrains Mono', monospace; }
+        .preview-frame { width:100%; height:450px; border:1px solid var(--border); border-radius:8px; background:#000; }
+        .preview-img { max-width:100%; max-height:450px; object-fit:contain; border-radius:8px; border:1px solid var(--border); display:block; margin:0 auto; }
+
+        .validation-box { border-radius:6px; padding:12px 14px; margin-top:10px; font-size:12.5px; }
+        .validation-box.ok { background:rgba(76,175,130,.1); border:1px solid rgba(76,175,130,.3); color:var(--ok); }
+        .validation-box.warn { background:rgba(224,161,60,.1); border:1px solid rgba(224,161,60,.3); color:var(--warn); }
+        .validation-box.err { background:rgba(217,97,79,.1); border:1px solid rgba(217,97,79,.3); color:var(--err); }
+        .validation-box ul { margin:6px 0 0; padding-left:18px; line-height:1.6; }
 
         /* ---------------- LOG PANEL ---------------- */
         .logpanel { background:#0c0f16; border-left:1px solid var(--border); display:flex; flex-direction:column; height:100vh; }
-        .logpanel-head { padding:16px 18px 12px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+        .logpanel-head { padding:14px 16px 10px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
         .logpanel-head h3 { margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600; }
-        .logstream { flex:1; overflow-y:auto; padding:12px 16px; }
-        .logentry { border-bottom:1px solid var(--border); padding:12px 0; font-family:'JetBrains Mono', monospace; font-size:11.5px; }
+        .logstream { flex:1; overflow-y:auto; padding:10px 14px; }
+        .logentry { border-bottom:1px solid var(--border); padding:10px 0; font-family:'JetBrains Mono', monospace; font-size:11.5px; }
         .logentry:first-child { padding-top:0; }
-        .lline { display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
-        .method { font-weight:700; padding:1px 6px; border-radius:4px; font-size:10.5px; }
+        .lline { display:flex; gap:8px; align-items:center; margin-bottom:5px; flex-wrap:wrap; }
+        .method { font-weight:700; padding:1px 6px; border-radius:4px; font-size:10px; }
         .method.GET { background:rgba(124,156,232,.18); color:var(--review); }
         .method.POST { background:rgba(76,175,130,.18); color:var(--ok); }
         .method.PATCH, .method.PUT { background:rgba(224,161,60,.18); color:var(--warn); }
@@ -134,52 +159,88 @@
         .lpath { color:var(--muted); word-break:break-all; }
         .ltime { color:#4a5268; margin-left:auto; font-size:10.5px; }
 
-        .split { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-        @media (max-width:1150px) { .split { grid-template-columns:1fr; } }
+        .pagination-bar { display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid var(--border); font-size:12px; color:var(--muted); }
     </style>
 </head>
 <body>
 
-<!-- ================= LOGIN SCREEN ================= -->
+<!-- ================= LOGIN / REGISTER SCREEN ================= -->
 <div id="loginScreen" class="login-wrap">
     <div class="login-box">
         <div class="login-brand"><div class="mark"></div><h1>BizOCR</h1></div>
-        <p class="login-sub">API Test Console — đăng nhập trước để lấy JWT, sau đó mới thao tác các bước còn lại.</p>
+        <p class="login-sub">Hệ thống trích xuất và duyệt chứng từ OCR thông minh — Đăng nhập / Đăng ký để bắt đầu.</p>
 
         <div class="card">
-            <h3>Đăng nhập — lấy JWT</h3>
-            <div class="field">
-                <label>Spring Boot base URL</label>
-                <input id="springBaseUrl" value="http://localhost:8080">
-            </div>
-
             <div class="toggle-row">
-                <button type="button" class="toggle-btn" id="tglAuthApi">Đăng nhập qua API</button>
-                <button type="button" class="toggle-btn active" id="tglAuthManual">Dán token có sẵn</button>
+                <button type="button" class="toggle-btn active" id="tglAuthApi">Đăng nhập (Login)</button>
+                <button type="button" class="toggle-btn" id="tglAuthRegister">Đăng ký (Register)</button>
+                <button type="button" class="toggle-btn" id="tglAuthManual">Dán token có sẵn</button>
             </div>
 
-            <div id="authApiBlock" style="display:none">
+            <!-- TAB 1: LOGIN -->
+            <div id="authApiBlock">
+                <div class="field">
+                    <label>Spring Boot Base URL</label>
+                    <input id="springBaseUrl" value="http://localhost:8080">
+                </div>
                 <div class="row">
-                    <div class="field"><label>Auth path</label><input id="authPath" value="/api/v1/auth/login"></div>
+                    <div class="field">
+                        <label>Tên đăng nhập (Username)</label>
+                        <input id="loginUser" value="admin" placeholder="admin">
+                    </div>
+                    <div class="field">
+                        <label>Mật khẩu (Password)</label>
+                        <input id="loginPass" type="password" value="admin" placeholder="••••••">
+                    </div>
                 </div>
-                <div class="field">
-                    <label>Request body (JSON) — khớp đúng LoginRequest(username, password) hiện tại</label>
-                    <textarea id="authBody" rows="3">{
-  "username": "admin",
-  "password": "admin"
-}</textarea>
-                </div>
-                <button id="btnLogin">Đăng nhập</button>
-                <p class="hint">Khớp đúng <code>AuthController</code> hiện tại: chỉ nhận <code>username</code>/<code>password</code> (hardcode test <code>admin</code>/<code>admin</code>), trả về field <code>access_token</code>. Token này có claim <code>roles: ["ADMIN","REVIEWER"]</code> và <code>companyId: 1</code> sẵn.</p>
+                <button id="btnLogin" style="width:100%">Đăng nhập (POST /api/v1/auth/login)</button>
+                <p class="hint">API sẽ kiểm tra tài khoản & mật khẩu qua PasswordEncoder trong CSDL và trả về JWT Bearer Token chứa <code>roles</code> và <code>companyId</code>.</p>
             </div>
 
-            <div id="authManualBlock">
-                <p class="hint" style="margin-top:0; margin-bottom:10px">Đúng quy trình bạn hay dùng ở Postman: gọi API sinh token (POST), copy chuỗi JWT trả về, dán vào ô dưới đây — console sẽ tự gắn <code>Authorization: Bearer &lt;token&gt;</code> cho mọi request tiếp theo, không khác gì chọn Bearer Token trong tab Authorization của Postman.</p>
+            <!-- TAB 2: REGISTER -->
+            <div id="authRegisterBlock" style="display:none">
+                <div class="row">
+                    <div class="field">
+                        <label>Tên đăng nhập (Username) *</label>
+                        <input id="regUser" placeholder="reviewer01">
+                    </div>
+                    <div class="field">
+                        <label>Mật khẩu (Password) *</label>
+                        <input id="regPass" type="password" placeholder="••••••">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="field">
+                        <label>Email *</label>
+                        <input id="regEmail" placeholder="reviewer@company.com">
+                    </div>
+                    <div class="field">
+                        <label>Số điện thoại</label>
+                        <input id="regPhone" placeholder="0901234567">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="field">
+                        <label>Mã số thuế doanh nghiệp (Tax Code)</label>
+                        <input id="regTaxCode" placeholder="0312345678">
+                    </div>
+                    <div class="field">
+                        <label>Tên công ty (Company Name)</label>
+                        <input id="regCompanyName" placeholder="Công ty TNHH Giải Pháp Số">
+                    </div>
+                </div>
+                <button id="btnRegister" style="width:100%">Đăng ký tài khoản (POST /api/v1/auth/register)</button>
+                <p class="hint">Hệ thống sẽ tự động liên kết hoặc khởi tạo doanh nghiệp (Tenant Company) và gán quyền REVIEWER.</p>
+            </div>
+
+            <!-- TAB 3: MANUAL TOKEN -->
+            <div id="authManualBlock" style="display:none">
+                <p class="hint" style="margin-top:0; margin-bottom:10px">Dán chuỗi JWT token sinh từ Postman hoặc hệ thống bên ngoài:</p>
                 <div class="field">
-                    <label>JWT token</label>
+                    <label>JWT Token</label>
                     <textarea id="manualToken" rows="4" placeholder="eyJhbGciOi..."></textarea>
                 </div>
-                <button id="btnUseManualToken">Dùng token này</button>
+                <button id="btnUseManualToken" style="width:100%">Dùng token này</button>
             </div>
 
             <div class="login-result" id="loginResult"></div>
@@ -187,189 +248,214 @@
     </div>
 </div>
 
-<!-- ================= MAIN APP (hidden until login) ================= -->
+<!-- ================= MAIN APP SHELL ================= -->
 <div class="app" id="appShell" style="display:none">
 
+    <!-- SIDEBAR -->
     <div class="sidebar">
         <div class="brand"><div class="mark"></div><h1>BizOCR</h1></div>
-        <p class="brand-sub">API Test Console</p>
+        <p class="brand-sub">Console điều khiển</p>
 
-        <div class="nav-item active" data-tab="upload"><span class="dot"></span>Bước 1 · Upload</div>
-        <div class="nav-item" data-tab="track"><span class="dot"></span>Bước 2 · Theo dõi xử lý</div>
+        <div class="nav-category">Quy trình xử lý</div>
+        <div class="nav-item active" data-tab="upload"><span class="dot"></span>Bước 1 · Upload & Chụp</div>
+        <div class="nav-item" data-tab="track"><span class="dot"></span>Bước 2 · Theo dõi & Rule</div>
         <div class="nav-item" data-tab="file"><span class="dot"></span>Bước 3 · Xem file gốc</div>
         <div class="nav-item" data-tab="classify"><span class="dot"></span>Bước 4 · Phân loại nhanh</div>
-        <div class="nav-item" data-tab="edit"><span class="dot"></span>Bước 5 · Sửa field (audit)</div>
-        <div class="nav-item" data-tab="approve"><span class="dot"></span>Bước 6 · Duyệt</div>
+        <div class="nav-item" data-tab="edit"><span class="dot"></span>Bước 5 · Sửa field (Audit)</div>
+        <div class="nav-item" data-tab="approve"><span class="dot"></span>Bước 6 · Duyệt chứng từ</div>
         <div class="nav-item" data-tab="export"><span class="dot"></span>Bước 7 · Xuất Excel</div>
+
+        <div class="nav-category">Quản trị & Công cụ</div>
+        <div class="nav-item" data-tab="list"><span class="dot"></span>Danh sách chứng từ</div>
         <div class="nav-item" data-tab="template"><span class="dot"></span>Cấu hình Template</div>
         <div class="nav-item" data-tab="custom"><span class="dot"></span>Request tuỳ chỉnh</div>
 
         <div class="sidebar-foot">
-            <div class="who"><span class="k">User:</span> <span id="whoUser">—</span></div>
-            <div class="who"><span class="k">Company:</span> <span id="whoCompany">—</span></div>
-            <div class="who"><span class="k">Role:</span> <span id="whoRole">—</span></div>
-            <button class="secondary small" id="btnLogout" style="margin-top:8px; width:100%">Đăng xuất / đổi token</button>
+            <div class="who"><span class="k">User:</span> <strong id="whoUser">—</strong></div>
+            <div class="who"><span class="k">Company ID:</span> <span id="whoCompany" class="mono">—</span></div>
+            <div class="who"><span class="k">Role:</span> <span id="whoRole" class="mono">—</span></div>
+            <button class="secondary small" id="btnLogout" style="margin-top:10px; width:100%">Đăng xuất</button>
         </div>
     </div>
 
+    <!-- MAIN CONTENT -->
     <div class="main">
+        <!-- GLOBAL DOC ID BAR -->
         <div class="docid-bar">
-            <label style="margin:0">Document ID hiện tại</label>
-            <input id="globalDocId" placeholder="Sẽ tự điền sau khi Upload ở Bước 1, hoặc dán tay">
-            <button class="secondary small" id="btnCopyDocId" type="button">Copy</button>
+            <label>DOCUMENT ID HIỆN TẠI</label>
+            <input id="globalDocId" placeholder="Tự điền sau khi Upload / Chọn từ Danh sách, hoặc nhập ID">
+            <button class="secondary small" id="btnCopyDocId" type="button">Sao chép</button>
+            <button class="secondary small" id="btnRefreshDoc" type="button">↻ Làm mới</button>
         </div>
 
         <!-- BƯỚC 1: UPLOAD -->
         <div class="tab-content" id="tab-upload">
-            <h2 class="panel-title"><span class="step-tag">1</span>Upload ảnh chứng từ</h2>
-            <p class="panel-desc">POST /api/v1/documents/upload — form-data, key <code>file</code>. Kỳ vọng: 200 OK, trả documentId, status PENDING.</p>
+            <h2 class="panel-title"><span class="step-tag">1</span>Upload chứng từ & Tiếp nhận xử lý ngầm</h2>
+            <p class="panel-desc">POST /api/v1/documents/upload — Tải ảnh hóa đơn/chứng từ lên hệ thống. Server sẽ lưu trữ, sinh ID, và đẩy vào hàng đợi Redis (Redis Queue) để pipeline AI/OCR xử lý ngầm.</p>
 
             <div class="card">
                 <div class="drop-zone" id="dropZone">
-                    <div>Kéo thả file vào đây, hoặc <strong>bấm để chọn</strong></div>
-                    <div class="hint">Ảnh hóa đơn / PDF chứng từ</div>
+                    <div>Kéo thả file vào đây, hoặc <strong>bấm để chọn từ máy</strong></div>
+                    <div class="hint">Hỗ trợ định dạng: JPEG, PNG, PDF, TIFF, WebP</div>
                 </div>
                 <input type="file" id="fileInput" accept="image/*,.pdf" style="display:none">
 
-                <div class="row" style="margin-top:10px; align-items:center">
+                <div class="row" style="margin-top:12px; align-items:center">
                     <div style="color:var(--muted); font-size:12px">— hoặc —</div>
-                    <button class="secondary" id="btnOpenCamera" type="button">📷 Chụp ảnh</button>
+                    <button class="secondary" id="btnOpenCamera" type="button">📷 Chụp ảnh trực tiếp từ Camera</button>
                 </div>
 
                 <div id="cameraBox" style="display:none; margin-top:12px">
-                    <video id="cameraVideo" autoplay playsinline muted style="width:100%; max-height:380px; background:#000; border-radius:8px; border:1px solid var(--border); display:block"></video>
+                    <video id="cameraVideo" autoplay playsinline muted style="width:100%; max-height:360px; background:#000; border-radius:8px; border:1px solid var(--border); display:block"></video>
                     <div class="row" style="margin-top:10px">
-                        <button id="btnSnap" type="button">Chụp ảnh</button>
+                        <button id="btnSnap" type="button">Chụp ảnh này</button>
                         <button class="secondary" id="btnSwitchCamera" type="button">Đổi camera</button>
                         <button class="secondary" id="btnCloseCamera" type="button">Đóng camera</button>
                     </div>
-                    <p class="hint" id="cameraHint">Đang mở camera… trình duyệt có thể hỏi cấp quyền truy cập Camera, bấm Cho phép.</p>
+                    <p class="hint" id="cameraHint">Đang mở camera…</p>
                 </div>
                 <canvas id="cameraCanvas" style="display:none"></canvas>
 
                 <div id="fileChipHolder"></div>
-                <div style="margin-top:14px"><button id="btnUpload">Gửi upload</button></div>
+                <div style="margin-top:16px"><button id="btnUpload">Gửi Upload lên Server</button></div>
             </div>
 
             <div class="card" id="uploadResultCard" style="display:none">
-                <h3>Kết quả</h3>
+                <h3>Kết quả tiếp nhận</h3>
                 <div id="uploadResultBody"></div>
             </div>
         </div>
 
-        <!-- BƯỚC 2: THEO DÕI -->
+        <!-- BƯỚC 2: THEO DÕI XỬ LÝ & VALIDATION -->
         <div class="tab-content" id="tab-track" style="display:none">
-            <h2 class="panel-title"><span class="step-tag">2</span>Theo dõi xử lý ngầm</h2>
-            <p class="panel-desc">GET /api/v1/documents/{documentId} — gọi lặp lại để theo dõi PENDING → PROCESSING → COMPLETED / NEED_REVIEW / WARNING_ANOMALY.</p>
+            <h2 class="panel-title"><span class="step-tag">2</span>Theo dõi Pipeline & Kiểm tra Business Rule</h2>
+            <p class="panel-desc">GET /api/v1/documents/{documentId} — Giám sát máy trạng thái (FSM) và chi tiết bóc tách, Shadow Mode validator, Grounding, kiểm tra mã số thuế & công thức số tiền.</p>
 
             <div class="card">
-                <div class="row">
-                    <button id="btnTrackOnce">Kiểm tra 1 lần</button>
-                    <button class="secondary" id="btnTrackPoll">Bật tự động (3s)</button>
+                <div class="row" style="align-items:center">
+                    <button id="btnTrackOnce">Kiểm tra ngay (1 lần)</button>
+                    <button class="secondary" id="btnTrackPoll">Bật tự động cập nhật (3s)</button>
+                    <div id="trackLiveIndicator" style="display:none" class="tag-ok">Đang tự động theo dõi...</div>
                 </div>
             </div>
 
             <div class="card" id="trackResultCard" style="display:none">
-                <h3>Trạng thái hiện tại</h3>
+                <h3>Chi tiết trạng thái & Thông tin Document</h3>
                 <table class="kv-table" id="trackTable"></table>
-                <div class="hint" id="trackHint"></div>
+
+                <div id="validationReportContainer" style="margin-top:16px"></div>
+
+                <div class="hint" id="trackHint" style="margin-top:12px"></div>
             </div>
         </div>
 
         <!-- BƯỚC 3: XEM FILE GỐC -->
         <div class="tab-content" id="tab-file" style="display:none">
-            <h2 class="panel-title"><span class="step-tag">3</span>Xem file gốc</h2>
-            <p class="panel-desc">GET /api/v1/documents/{documentId}/file — trả về ảnh/PDF gốc đã upload.</p>
+            <h2 class="panel-title"><span class="step-tag">3</span>Xem file gốc đã upload</h2>
+            <p class="panel-desc">GET /api/v1/documents/{documentId}/file — Trả về file chứng từ gốc được lưu trữ trong hệ thống lưu trữ (StorageService).</p>
 
             <div class="card">
-                <button id="btnLoadFile">Tải file gốc</button>
+                <button id="btnLoadFile">Tải & Xem file gốc</button>
             </div>
 
             <div class="card" id="filePreviewCard" style="display:none">
-                <h3>Xem trước</h3>
+                <h3>Xem trước tài liệu</h3>
                 <div id="filePreviewHolder"></div>
             </div>
         </div>
 
         <!-- BƯỚC 4: PHÂN LOẠI NHANH -->
         <div class="tab-content" id="tab-classify" style="display:none">
-            <h2 class="panel-title"><span class="step-tag">4</span>Phân loại nhanh (độc lập)</h2>
-            <p class="panel-desc">POST /api/v1/documents/classify — test riêng bước classify. rawOcrText tự tải từ Document ID hiện tại.</p>
+            <h2 class="panel-title"><span class="step-tag">4</span>Phân loại loại văn bản nhanh</h2>
+            <p class="panel-desc">POST /api/v1/documents/classify — Thử nghiệm độc lập logic phân loại (Template Matcher / Regex / Keyword / Fallback AI) dựa trên văn bản OCR thô.</p>
 
             <div class="card">
                 <div class="row" style="align-items:center">
-                    <button class="secondary small" id="btnLoadClassifyText" type="button">↻ Tải rawOcrText từ Document</button>
+                    <button class="secondary small" id="btnLoadClassifyText" type="button">↻ Lấy rawOcrText từ Document hiện tại</button>
                     <div class="hint" id="classifyLoadHint"></div>
                 </div>
-                <div class="field" style="margin-top:10px">
-                    <label>rawOcrText</label>
-                    <textarea id="classifyText" rows="6" placeholder="Bấm 'Tải rawOcrText từ Document' ở trên, hoặc dán tay để test độc lập"></textarea>
+                <div class="field" style="margin-top:12px">
+                    <label>Nội dung OCR thô (rawOcrText)</label>
+                    <textarea id="classifyText" rows="6" placeholder="Nhập hoặc tải rawOcrText để kiểm tra bộ phân loại..."></textarea>
                 </div>
-                <button id="btnClassify">Gửi phân loại</button>
+                <button id="btnClassify">Thực hiện phân loại</button>
             </div>
 
             <div class="card" id="classifyResultCard" style="display:none">
-                <h3>KẾT QUẢ PHÂN LOẠI</h3>
+                <h3>Kết quả phân loại</h3>
                 <table class="kv-table" id="classifyTable"></table>
             </div>
         </div>
 
-        <!-- BƯỚC 5: SỬA FIELD -->
+        <!-- BƯỚC 5: SỬA FIELD & AUDIT TRAIL -->
         <div class="tab-content" id="tab-edit" style="display:none">
-            <h2 class="panel-title"><span class="step-tag">5</span>Sửa field thủ công (audit trail)</h2>
-            <p class="panel-desc">PUT /api/v1/documents/{documentId} — extractedFields tự tải từ Document hiện tại, bạn sửa lại giá trị sai rồi gửi.</p>
+            <h2 class="panel-title"><span class="step-tag">5</span>Sửa trường dữ liệu & Ghi nhận Audit</h2>
+            <p class="panel-desc">PUT /api/v1/documents/{documentId} — Cho phép kiểm toán viên/reviewer hiệu chỉnh các trường đã bóc tách. Mọi thay đổi sẽ tự động ghi vết vào bảng <code>field_correction_audit</code>.</p>
 
             <div class="card">
                 <div class="row" style="align-items:center">
-                    <button class="secondary small" id="btnLoadEditFields" type="button">↻ Tải extractedFields từ Document</button>
+                    <button class="secondary small" id="btnLoadEditFields" type="button">↻ Tải dữ liệu trường từ Document</button>
                     <div class="hint" id="editLoadHint"></div>
                 </div>
 
-                <div class="row" style="margin-top:10px">
+                <div class="row" style="margin-top:12px">
                     <div class="field">
-                        <label>status</label>
+                        <label>Trạng thái (Document Status)</label>
                         <select id="editStatus">
-                            <option value="NEED_REVIEW">NEED_REVIEW</option>
-                            <option value="PENDING">PENDING</option>
-                            <option value="REJECTED">REJECTED</option>
+                            <option value="PENDING">PENDING (Vừa upload, chờ xử lý)</option>
+                            <option value="PROCESSING">PROCESSING (Đang xử lý ngầm)</option>
+                            <option value="OCR_DONE">OCR_DONE (Đã OCR thô)</option>
+                            <option value="CLASSIFIED">CLASSIFIED (Đã phân loại)</option>
+                            <option value="EXTRACTED">EXTRACTED (Đã bóc tách)</option>
+                            <option value="VALIDATED">VALIDATED (Đã kiểm tra hợp lệ)</option>
+                            <option value="NEEDS_REVIEW">NEEDS_REVIEW (Cần kiểm tra thủ công)</option>
+                            <option value="APPROVED">APPROVED (Đã duyệt)</option>
+                            <option value="REJECTED_QUALITY">REJECTED_QUALITY (Từ chối chất lượng)</option>
+                            <option value="FAILED">FAILED (Lỗi kỹ thuật)</option>
                         </select>
                     </div>
                 </div>
                 <div class="field">
-                    <label>extractedFields (JSON object — console sẽ tự escape thành chuỗi khi gửi)</label>
-                    <textarea id="editFields" rows="6" placeholder="Bấm 'Tải extractedFields từ Document' ở trên"></textarea>
+                    <label>Các trường dữ liệu (Extracted Fields)</label>
+                    <!-- Vùng chứa các thẻ input sinh tự động -->
+                    <div id="dynamicFieldsContainer" class="row" style="border:1px solid var(--border); padding:16px 12px 4px; border-radius:6px; background:var(--bg); margin-bottom: 12px;">
+                        <div class="empty" style="width:100%; padding: 10px 0;">Chưa có dữ liệu. Bấm "Tải dữ liệu trường" phía trên.</div>
+                    </div>
+                    <!-- Ẩn textarea đi làm nơi chứa phòng hờ nếu cần -->
+                    <textarea id="editFields" style="display:none;"></textarea>
                 </div>
-                <button id="btnSubmitEdit">Gửi cập nhật (PUT)</button>
-                <p class="hint">Chỉ 3 status này được phép qua API cập nhật chung. <code>APPROVED</code> bị chặn cứng ở đây (trả lỗi 400) — phải dùng đúng Bước 6 (POST /approve).</p>
+                <button id="btnSubmitEdit">Lưu cập nhật & Ghi Audit (PUT)</button>
+                <p class="hint">Lưu ý: Trạng thái <code>APPROVED</code> bị chặn ở endpoint này để đảm bảo toàn vẹn quy trình duyệt (hãy dùng Bước 6 để Duyệt chính thức).</p>
             </div>
 
             <div class="card" id="editResultCard" style="display:none">
-                <h3>Kết quả</h3>
+                <h3>Kết quả cập nhật</h3>
                 <div class="lbody" id="editResultBody"></div>
             </div>
         </div>
 
-        <!-- BƯỚC 6: DUYỆT -->
+        <!-- BƯỚC 6: DUYỆT CHỨNG TỪ -->
         <div class="tab-content" id="tab-approve" style="display:none">
-            <h2 class="panel-title"><span class="step-tag">6</span>Duyệt (Approve)</h2>
-            <p class="panel-desc">POST /api/v1/documents/{documentId}/approve — taxCode/companyName/contactName/contactTitle tự gợi ý từ OCR, bạn xác nhận hoặc sửa lại trước khi duyệt.</p>
+            <h2 class="panel-title"><span class="step-tag">6</span>Duyệt chính thức chứng từ (Approve)</h2>
+            <p class="panel-desc">POST /api/v1/documents/{documentId}/approve — Duyệt chứng từ, xác thực thông tin công ty qua VietQR / Tax API, tự động gắn Tenant & Alias, tìm gợi ý ngành nghề và thu thập mẫu ML.</p>
 
             <div class="card">
                 <div class="row" style="align-items:center">
-                    <button class="secondary small" id="btnLoadApproveSuggestion" type="button">↻ Gợi ý từ OCR (taxCode/companyName/contactName)</button>
+                    <button class="secondary small" id="btnLoadApproveSuggestion" type="button">↻ Tải gợi ý công ty & Trường dữ liệu</button>
                     <div class="hint" id="approveLoadHint"></div>
                 </div>
 
-                <div class="row" style="margin-top:10px">
+                <div class="row" style="margin-top:12px">
                     <div class="field">
-                        <label>Loại chứng từ (documentType / approvedType)</label>
+                        <label>Loại chứng từ phê duyệt (approvedType) *</label>
                         <select id="approveType">
-                            <option value="CONTRACT">CONTRACT (Hợp đồng / Biên bản)</option>
                             <option value="VAT_INVOICE">VAT_INVOICE (Hóa đơn GTGT)</option>
+                            <option value="CONTRACT">CONTRACT (Hợp đồng / Biên bản)</option>
                             <option value="ELECTRICITY_BILL">ELECTRICITY_BILL (Hóa đơn tiền điện)</option>
-                            <option value="RECEIPT">RECEIPT (Biên nhận / Phiếu thu)</option>
+                            <option value="WATER_BILL">WATER_BILL (Hóa đơn tiền nước)</option>
+                            <option value="SERVICE_PAYMENT_VOUCHER">SERVICE_PAYMENT_VOUCHER (Phiếu chi / Dịch vụ)</option>
                             <option value="NAMECARD">NAMECARD (Danh thiếp)</option>
-                            <option value="STATEMENT">STATEMENT (Sao kê ngân hàng)</option>
+                            <option value="STATEMENT">STATEMENT (Sao kê tài khoản)</option>
                             <option value="OTHER">OTHER (Khác)</option>
                         </select>
                     </div>
@@ -377,54 +463,150 @@
 
                 <div class="row">
                     <div class="field">
-                        <label>Người liên hệ trên Namecard (contactName)</label>
-                        <input id="approveContactName" placeholder="Tự điền sau khi bấm Gợi ý từ OCR">
+                        <label>Mã số thuế doanh nghiệp (taxCode)</label>
+                        <input id="approveTaxCode" placeholder="Gợi ý từ OCR hoặc nhập">
+                    </div>
+                    <div class="field">
+                        <label>Tên công ty xác nhận (companyName) *</label>
+                        <input id="approveCompanyName" placeholder="Gợi ý từ OCR hoặc nhập">
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="field">
+                        <label>Người liên hệ / Đại diện (contactName)</label>
+                        <input id="approveContactName" placeholder="Áp dụng cho Namecard / Hợp đồng">
                     </div>
                     <div class="field">
                         <label>Chức vụ (contactTitle)</label>
-                        <input id="approveContactTitle" placeholder="Tự điền sau khi bấm Gợi ý từ OCR">
+                        <input id="approveContactTitle" placeholder="Áp dụng cho Namecard">
                     </div>
                 </div>
-                <p class="hint">2 trường trên chỉ áp dụng khi loại chứng từ là NAMECARD — để trống nếu không liên quan.</p>
 
                 <div class="field">
-                    <label>Request Body (JSON) — taxCode/companyName tự điền từ gợi ý OCR, kiểm tra lại trước khi duyệt</label>
-                    <textarea id="approveBody" rows="4" placeholder='Bấm "Gợi ý từ OCR" ở trên, hoặc gõ tay: {"taxCode": "...", "companyName": "..."}'></textarea>
+                    <label>Các trường dữ liệu đã xác thực (updatedFields - JSON)</label>
+                    <textarea id="approveUpdatedFields" rows="6" placeholder='{ "tax_code": "...", "total_amount": "..." }'></textarea>
                 </div>
-                <button id="btnApprove">Duyệt chứng từ</button>
+
+                <button id="btnApprove">Xác nhận Duyệt chứng từ (Approve)</button>
             </div>
 
             <div class="card" id="approveResultCard" style="display:none">
-                <h3>Thông tin công ty đã xác nhận</h3>
+                <h3>Thông tin doanh nghiệp sau khi duyệt</h3>
                 <table class="kv-table" id="approveCompanyTable"></table>
 
-                <h3 style="margin-top:16px">Ngành nghề gợi ý (Search API — mức A, chưa xác thực đầy đủ)</h3>
-                <div id="approveIndustryList" class="hint">—</div>
+                <h3 style="margin-top:16px">Kết quả tra cứu Tax API / VietQR</h3>
+                <table class="kv-table" id="approveTaxLookupTable"></table>
 
-                <h3 style="margin-top:16px">Raw response</h3>
+                <h3 style="margin-top:16px">Gợi ý ngành nghề kinh doanh</h3>
+                <div id="approveIndustryList" class="hint" style="font-size:13px; color:var(--text); margin-top:6px">—</div>
+
+                <h3 style="margin-top:16px">Phản hồi thô (Raw JSON)</h3>
                 <div class="lbody" id="approveResultBody"></div>
             </div>
         </div>
 
         <!-- BƯỚC 7: XUẤT EXCEL -->
         <div class="tab-content" id="tab-export" style="display:none">
-            <h2 class="panel-title"><span class="step-tag">7</span>Xuất báo cáo Excel</h2>
-            <p class="panel-desc">GET /api/v1/documents/export — tải file .xlsx chỉ gồm chứng từ status = APPROVED thuộc companyId của token hiện tại.</p>
+            <h2 class="panel-title"><span class="step-tag">7</span>Xuất báo cáo kế toán (Excel)</h2>
+            <p class="panel-desc">GET /api/v1/documents/export — Xuất toàn bộ danh sách chứng từ đã duyệt (APPROVED) thuộc quyền quản lý của công ty hiện tại ra định dạng Microsoft Excel (.xlsx).</p>
 
             <div class="card">
-                <button id="btnExport">Tải file Excel</button>
+                <button id="btnExport">📥 Tải file báo cáo bao_cao_ke_toan.xlsx</button>
                 <div id="exportResult"></div>
+            </div>
+        </div>
+
+        <!-- DANH SÁCH CHỨNG TỪ (DOCUMENTS LIST) -->
+        <div class="tab-content" id="tab-list" style="display:none">
+            <h2 class="panel-title">Danh sách chứng từ trong hệ thống</h2>
+            <p class="panel-desc">GET /api/v1/documents — Lọc, tìm kiếm và phân trang chứng từ theo trạng thái và loại văn bản của công ty.</p>
+
+            <div class="card">
+                <div class="row" style="align-items:flex-end">
+                    <div class="field">
+                        <label>Lọc theo trạng thái (Status)</label>
+                        <select id="filterStatus">
+                            <option value="">-- Tất cả trạng thái --</option>
+                            <option value="PENDING">PENDING (Chờ xử lý)</option>
+                            <option value="PROCESSING">PROCESSING (Đang xử lý)</option>
+                            <option value="OCR_DONE">OCR_DONE (Đã OCR)</option>
+                            <option value="CLASSIFIED">CLASSIFIED (Đã phân loại)</option>
+                            <option value="EXTRACTED">EXTRACTED (Đã trích xuất)</option>
+                            <option value="VALIDATED">VALIDATED (Đã hợp lệ)</option>
+                            <option value="NEEDS_REVIEW">NEEDS_REVIEW (Cần kiểm tra)</option>
+                            <option value="APPROVED">APPROVED (Đã duyệt)</option>
+                            <option value="REJECTED_QUALITY">REJECTED_QUALITY (Từ chối chất lượng)</option>
+                            <option value="FAILED">FAILED (Lỗi)</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Lọc theo loại chứng từ (Document Type)</label>
+                        <select id="filterType">
+                            <option value="">-- Tất cả loại --</option>
+                            <option value="VAT_INVOICE">VAT_INVOICE</option>
+                            <option value="CONTRACT">CONTRACT</option>
+                            <option value="ELECTRICITY_BILL">ELECTRICITY_BILL</option>
+                            <option value="WATER_BILL">WATER_BILL</option>
+                            <option value="SERVICE_PAYMENT_VOUCHER">SERVICE_PAYMENT_VOUCHER</option>
+                            <option value="NAMECARD">NAMECARD</option>
+                            <option value="STATEMENT">STATEMENT</option>
+                            <option value="OTHER">OTHER</option>
+                        </select>
+                    </div>
+                    <div class="field" style="flex:0 0 120px">
+                        <label>Số lượng/trang</label>
+                        <select id="filterSize">
+                            <option value="10">10 dòng</option>
+                            <option value="20">20 dòng</option>
+                            <option value="50">50 dòng</option>
+                        </select>
+                    </div>
+                    <div class="field" style="flex:0 0 auto">
+                        <button id="btnSearchDocs">Tìm kiếm</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Danh sách kết quả</h3>
+                <div style="overflow-x:auto">
+                    <table class="data-table" id="docListTable">
+                        <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Tên file</th>
+                            <th>Loại chứng từ</th>
+                            <th>Trạng thái</th>
+                            <th>Điểm tin cậy</th>
+                            <th>Thời gian nhận</th>
+                            <th>Thao tác</th>
+                        </tr>
+                        </thead>
+                        <tbody id="docListBody">
+                        <tr><td colspan="7" class="empty">Bấm "Tìm kiếm" để tải danh sách.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="pagination-bar" id="paginationBar" style="display:none">
+                    <div id="pageInfo">Trang 1 / 1 (Tổng: 0)</div>
+                    <div style="display:flex; gap:6px">
+                        <button class="secondary small" id="btnPrevPage" disabled>Trang trước</button>
+                        <button class="secondary small" id="btnNextPage" disabled>Trang sau</button>
+                    </div>
+                </div>
             </div>
         </div>
 
         <!-- CẤU HÌNH TEMPLATE -->
         <div class="tab-content" id="tab-template" style="display:none">
             <h2 class="panel-title">Nạp lại cấu hình Template</h2>
-            <p class="panel-desc">POST /api/v1/templates/reload — Gọi API này để xóa cache và tải lại danh sách template (bao gồm Regex bóc tách) từ Database vào bộ nhớ ứng dụng.</p>
+            <p class="panel-desc">POST /api/v1/templates/reload — Gọi API này để xóa bộ nhớ đệm (cache) và nạp lại toàn bộ cấu hình quy tắc phân loại và bóc tách từ CSDL.</p>
 
             <div class="card">
-                <button id="btnReloadTemplate">Nạp lại (Reload) Cấu hình</button>
-                <p class="hint" style="margin-top:10px">Sử dụng sau khi bạn cập nhật bảng <code>template_config</code> hoặc <code>template_field_config</code> trong CSDL.</p>
+                <button id="btnReloadTemplate">Nạp lại (Reload) Cấu hình Template</button>
+                <p class="hint" style="margin-top:10px">Sử dụng sau khi cập nhật dữ liệu bảng <code>template_config</code> hoặc <code>template_field_config</code>.</p>
             </div>
 
             <div class="card" id="templateResultCard" style="display:none">
@@ -433,34 +615,35 @@
             </div>
         </div>
 
-        <!-- CUSTOM -->
+        <!-- CUSTOM REQUEST -->
         <div class="tab-content" id="tab-custom" style="display:none">
-            <h2 class="panel-title">Request tuỳ chỉnh</h2>
-            <p class="panel-desc" style="margin-left:0">Gọi bất kỳ endpoint nào chưa cover ở trên. Token hiện tại vẫn tự động đính kèm, gửi tới Spring Boot base URL.</p>
+            <h2 class="panel-title">Request tuỳ chỉnh (Custom API)</h2>
+            <p class="panel-desc">Gửi yêu cầu HTTP tùy ý với token xác thực hiện tại tới bất kỳ endpoint nào của máy chủ.</p>
 
             <div class="card">
                 <div class="row">
                     <div class="field" style="flex:0 0 110px">
-                        <label>Method</label>
+                        <label>Phương thức</label>
                         <select id="customMethod"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select>
                     </div>
                     <div class="field" style="flex:3">
-                        <label>Path (relative, VD: /api/v1/documents/123)</label>
+                        <label>Đường dẫn API (VD: /api/v1/documents/123)</label>
                         <input id="customPath" placeholder="/api/v1/...">
                     </div>
                 </div>
                 <div class="field">
-                    <label>Body (JSON, bỏ trống nếu GET)</label>
-                    <textarea id="customBody" rows="6" placeholder='{ "key": "value" }'></textarea>
+                    <label>Body (JSON - để trống nếu là GET)</label>
+                    <textarea id="customBody" rows="5" placeholder='{ "key": "value" }'></textarea>
                 </div>
-                <button id="btnCustomSend">Gửi request</button>
+                <button id="btnCustomSend">Gửi Request</button>
             </div>
         </div>
     </div>
 
+    <!-- LOG PANEL -->
     <div class="logpanel">
         <div class="logpanel-head">
-            <h3>Request Log</h3>
+            <h3>Nhật ký API (Log)</h3>
             <button class="secondary small" id="btnClearLog">Xoá log</button>
         </div>
         <div class="logstream" id="logStream"><div class="empty">Chưa có request nào.</div></div>
@@ -469,9 +652,17 @@
 
 <script>
     (function() {
-        const state = { token: null, claims: null, pollTrackTimer: null };
+        const state = {
+            token: localStorage.getItem('bizocr_token') || null,
+            claims: null,
+            pollTrackTimer: null,
+            currentPage: 0,
+            pageSize: 10,
+            totalPages: 1
+        };
+
         const $ = (id) => document.getElementById(id);
-        const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
         function springBase() { return $('springBaseUrl').value.replace(/\/$/, ''); }
         function currentDocId() { return $('globalDocId').value.trim(); }
@@ -490,10 +681,11 @@
             if (resBody) bodyHtml += `<div class="lbody">← ${escapeHtml(resBody)}</div>`;
             if (error) bodyHtml += `<div class="lbody">✕ ${escapeHtml(error)}</div>`;
             entry.innerHTML = `
-      <div class="lline"><span class="method ${method}">${method}</span><span class="lstatus ${statusClass}">${error ? 'ERR' : status}</span><span class="ltime">${time}</span></div>
-      <div class="lpath">${escapeHtml(url)}</div>${bodyHtml}`;
+                <div class="lline"><span class="method ${method}">${method}</span><span class="lstatus ${statusClass}">${error ? 'ERR' : status}</span><span class="ltime">${time}</span></div>
+                <div class="lpath">${escapeHtml(url)}</div>${bodyHtml}`;
             stream.prepend(entry);
         }
+
         $('btnClearLog').addEventListener('click', () => { $('logStream').innerHTML = '<div class="empty">Chưa có request nào.</div>'; });
 
         // ---------------- CORE FETCH (JSON) ----------------
@@ -506,14 +698,27 @@
             if (body) reqBodyLog = isForm ? '[multipart form-data]' : (typeof body === 'string' ? body : JSON.stringify(body));
 
             try {
-                const res = await fetch(url, { method, headers: finalHeaders, body: body ? (isForm ? body : (typeof body === 'string' ? body : JSON.stringify(body))) : undefined });
+                const res = await fetch(url, {
+                    method,
+                    headers: finalHeaders,
+                    body: body ? (isForm ? body : (typeof body === 'string' ? body : JSON.stringify(body))) : undefined
+                });
+
+                // Xử lý 401 Unauthorized
+                if (res.status === 401) {
+                    logRequest(method, url, 401, reqBodyLog, 'Unauthorized');
+                    alert('Phiên đăng nhập đã hết hạn (401). Vui lòng đăng nhập lại.');
+                    doLogout();
+                    return { ok: false, status: 401, data: null };
+                }
+
                 const text = await res.text();
                 let json = null;
                 try { json = JSON.parse(text); } catch (e) {}
                 logRequest(method, url, res.status, reqBodyLog, text ? (json ? JSON.stringify(json, null, 2) : text) : '(empty body)');
                 return { ok: res.ok, status: res.status, data: json !== null ? json : text };
             } catch (err) {
-                logRequest(method, url, null, reqBodyLog, null, err.message + ' — kiểm tra CORS / base URL / service có đang chạy không.');
+                logRequest(method, url, null, reqBodyLog, null, err.message + ' — kiểm tra CORS / URL kết nối.');
                 return { ok: false, status: 0, data: null, error: err.message };
             }
         }
@@ -525,6 +730,14 @@
             if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
             try {
                 const res = await fetch(url, { method, headers });
+
+                // Xử lý 401 Unauthorized
+                if (res.status === 401) {
+                    alert('Phiên đăng nhập đã hết hạn (401). Vui lòng đăng nhập lại.');
+                    doLogout();
+                    return { ok: false, status: 401 };
+                }
+
                 const contentType = res.headers.get('content-type') || '';
                 if (!res.ok) {
                     const text = await res.text().catch(() => '');
@@ -532,7 +745,7 @@
                     return { ok: false, status: res.status };
                 }
                 const blob = await res.blob();
-                logRequest(method, url, res.status, null, `[binary, ${blob.size} bytes, ${contentType || 'unknown type'}]`);
+                logRequest(method, url, res.status, null, `[binary, ${(blob.size/1024).toFixed(1)} KB, ${contentType || 'unknown type'}]`);
                 return { ok: true, status: res.status, blob, contentType };
             } catch (err) {
                 logRequest(method, url, null, null, null, err.message + ' — kiểm tra CORS / base URL.');
@@ -540,15 +753,21 @@
             }
         }
 
-        // ================= LOGIN SCREEN =================
-        $('tglAuthApi').addEventListener('click', () => {
-            $('tglAuthApi').classList.add('active'); $('tglAuthManual').classList.remove('active');
-            $('authApiBlock').style.display = 'block'; $('authManualBlock').style.display = 'none';
-        });
-        $('tglAuthManual').addEventListener('click', () => {
-            $('tglAuthManual').classList.add('active'); $('tglAuthApi').classList.remove('active');
-            $('authManualBlock').style.display = 'block'; $('authApiBlock').style.display = 'none';
-        });
+        // ================= AUTH MANAGEMENT =================
+        function switchAuthTab(tab) {
+            $('tglAuthApi').classList.toggle('active', tab === 'login');
+            $('tglAuthRegister').classList.toggle('active', tab === 'register');
+            $('tglAuthManual').classList.toggle('active', tab === 'manual');
+
+            $('authApiBlock').style.display = tab === 'login' ? 'block' : 'none';
+            $('authRegisterBlock').style.display = tab === 'register' ? 'block' : 'none';
+            $('authManualBlock').style.display = tab === 'manual' ? 'block' : 'none';
+            $('loginResult').innerHTML = '';
+        }
+
+        $('tglAuthApi').addEventListener('click', () => switchAuthTab('login'));
+        $('tglAuthRegister').addEventListener('click', () => switchAuthTab('register'));
+        $('tglAuthManual').addEventListener('click', () => switchAuthTab('manual'));
 
         function decodeJwtPayload(token) {
             try {
@@ -560,6 +779,7 @@
 
         function enterApp(token) {
             state.token = token;
+            localStorage.setItem('bizocr_token', token);
             state.claims = decodeJwtPayload(token);
             $('whoUser').textContent = (state.claims && (state.claims.username || state.claims.sub)) || '—';
             $('whoCompany').textContent = (state.claims && (state.claims.companyId || state.claims.company_id)) || '—';
@@ -568,42 +788,88 @@
             $('appShell').style.display = 'grid';
         }
 
-        $('btnLogin').addEventListener('click', async () => {
-            let body;
-            try { body = JSON.parse($('authBody').value); }
-            catch (e) { $('loginResult').innerHTML = `<div class="err-text">Body JSON không hợp lệ: ${escapeHtml(e.message)}</div>`; return; }
+        function doLogout() {
+            state.token = null;
+            state.claims = null;
+            localStorage.removeItem('bizocr_token');
+            clearInterval(state.pollTrackTimer);
+            if (typeof stopCamera === 'function') stopCamera();
+            $('cameraBox').style.display = 'none';
+            $('appShell').style.display = 'none';
+            $('loginScreen').style.display = 'flex';
+        }
 
-            const result = await apiFetch(springBase(), $('authPath').value, { method: 'POST', body, useToken: false });
+        // Đăng nhập
+        $('btnLogin').addEventListener('click', async () => {
+            const username = $('loginUser').value.trim();
+            const password = $('loginPass').value;
+            if (!username || !password) {
+                $('loginResult').innerHTML = `<div class="err-text">Vui lòng nhập đầy đủ Username và Password.</div>`;
+                return;
+            }
+
+            const result = await apiFetch(springBase(), '/api/v1/auth/login', {
+                method: 'POST',
+                body: { username, password },
+                useToken: false
+            });
+
             if (result.ok) {
-                const token = (result.data && (result.data.access_token || result.data.token || result.data.accessToken || result.data.jwt))
-                    || (typeof result.data === 'string' ? result.data : null);
+                const token = result.data && result.data.access_token;
                 if (token) {
-                    $('loginResult').innerHTML = `<div class="ok-text">Đăng nhập thành công. Đang mở console…</div>`;
-                    setTimeout(() => enterApp(token), 400);
+                    $('loginResult').innerHTML = `<div class="ok-text">✓ Đăng nhập thành công! Đang chuyển vào hệ thống...</div>`;
+                    setTimeout(() => enterApp(token), 300);
                 } else {
-                    $('loginResult').innerHTML = `<div class="err-text">Login trả 200 nhưng không thấy field token/accessToken/jwt. Xem log yêu cầu ở panel bên dưới (mở tab "Dán token có sẵn" để copy thủ công).</div>`;
+                    $('loginResult').innerHTML = `<div class="err-text">Phản hồi 200 nhưng không tìm thấy trường access_token.</div>`;
                 }
             } else {
-                $('loginResult').innerHTML = `<div class="err-text">Đăng nhập thất bại (status ${result.status || 'network error'}). Kiểm tra lại authPath và body cho khớp AuthController thật.</div>`;
+                const errMsg = (result.data && result.data.error) || 'Đăng nhập thất bại (Sai tài khoản hoặc mật khẩu).';
+                $('loginResult').innerHTML = `<div class="err-text">✕ ${escapeHtml(errMsg)}</div>`;
             }
         });
 
+        // Đăng ký
+        $('btnRegister').addEventListener('click', async () => {
+            const username = $('regUser').value.trim();
+            const password = $('regPass').value;
+            const email = $('regEmail').value.trim();
+            const phoneNumber = $('regPhone').value.trim();
+            const taxCode = $('regTaxCode').value.trim();
+            const companyName = $('regCompanyName').value.trim();
+
+            if (!username || !password || !email) {
+                $('loginResult').innerHTML = `<div class="err-text">Vui lòng nhập tối thiểu: Username, Password và Email.</div>`;
+                return;
+            }
+
+            const result = await apiFetch(springBase(), '/api/v1/auth/register', {
+                method: 'POST',
+                body: { username, password, email, phoneNumber, taxCode, companyName },
+                useToken: false
+            });
+
+            if (result.ok) {
+                $('loginResult').innerHTML = `<div class="ok-text">✓ Đăng ký thành công! Hãy chuyển sang tab Đăng nhập.</div>`;
+                $('loginUser').value = username;
+                $('loginPass').value = password;
+                setTimeout(() => switchAuthTab('login'), 1200);
+            } else {
+                const errMsg = (result.data && (result.data.error || result.data.message)) || 'Đăng ký thất bại.';
+                $('loginResult').innerHTML = `<div class="err-text">✕ ${escapeHtml(errMsg)}</div>`;
+            }
+        });
+
+        // Dán token thủ công
         $('btnUseManualToken').addEventListener('click', () => {
             const t = $('manualToken').value.trim();
             if (!t) return;
             enterApp(t);
         });
 
-        $('btnLogout').addEventListener('click', () => {
-            state.token = null; state.claims = null;
-            clearInterval(state.pollTrackTimer);
-            if (typeof stopCamera === 'function') stopCamera();
-            $('cameraBox').style.display = 'none';
-            $('appShell').style.display = 'none';
-            $('loginScreen').style.display = 'flex';
-        });
+        // Đăng xuất
+        $('btnLogout').addEventListener('click', doLogout);
 
-        // ================= MAIN APP NAV =================
+        // ================= NAVIGATION =================
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', () => {
                 document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
@@ -612,7 +878,9 @@
                 $('tab-' + item.dataset.tab).style.display = 'block';
 
                 const tab = item.dataset.tab;
+                if (tab === 'list') loadDocumentList(0);
                 if (!currentDocId()) return;
+                if (tab === 'track') trackOnce();
                 if (tab === 'classify') loadClassifyTextFromDoc();
                 if (tab === 'edit') loadEditFieldsFromDoc();
                 if (tab === 'approve') loadApproveSuggestionFromDoc();
@@ -621,14 +889,28 @@
 
         async function fetchCurrentDoc() {
             const id = currentDocId();
-            if (!id) { alert('Chưa có Document ID. Upload ở Bước 1 trước.'); return null; }
+            if (!id) { alert('Chưa có Document ID. Hãy Upload hoặc chọn từ danh sách.'); return null; }
             const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}`);
-            if (!result.ok) { alert('Không tải được Document: status ' + (result.status || 'network error')); return null; }
+            if (!result.ok) { alert('Không tải được Document: ' + (result.status || 'network error')); return null; }
             return result.data;
         }
 
         $('btnCopyDocId').addEventListener('click', () => {
-            navigator.clipboard.writeText(currentDocId()).catch(() => {});
+            const id = currentDocId();
+            if (id) {
+                navigator.clipboard.writeText(id);
+                $('btnCopyDocId').textContent = 'Đã chép!';
+                setTimeout(() => $('btnCopyDocId').textContent = 'Sao chép', 1200);
+            }
+        });
+
+        $('btnRefreshDoc').addEventListener('click', () => {
+            const activeTab = document.querySelector('.nav-item.active')?.dataset.tab;
+            if (activeTab === 'track') trackOnce();
+            else if (activeTab === 'edit') loadEditFieldsFromDoc();
+            else if (activeTab === 'approve') loadApproveSuggestionFromDoc();
+            else if (activeTab === 'classify') loadClassifyTextFromDoc();
+            else if (activeTab === 'list') loadDocumentList(state.currentPage);
         });
 
         // ---------------- BƯỚC 1: UPLOAD ----------------
@@ -639,12 +921,13 @@
         dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
         dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('drag'); if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]); });
         fileInput.addEventListener('change', () => { if (fileInput.files.length) setFile(fileInput.files[0]); });
+
         function setFile(file) {
             selectedFile = file;
-            $('fileChipHolder').innerHTML = `<div class="file-chip">📄 ${escapeHtml(file.name)} <span style="color:var(--muted)">(${(file.size/1024).toFixed(1)} KB)</span></div>`;
+            $('fileChipHolder').innerHTML = `<div class="file-chip">📄 <strong>${escapeHtml(file.name)}</strong> <span style="color:var(--muted)">(${(file.size/1024).toFixed(1)} KB)</span></div>`;
         }
 
-        // ---------------- BƯỚC 1: CHỤP ẢNH TỪ CAMERA ----------------
+        // Camera chụp ảnh
         const cameraBox = $('cameraBox'), cameraVideo = $('cameraVideo'), cameraCanvas = $('cameraCanvas'), cameraHint = $('cameraHint');
         let cameraStream = null;
         let facingMode = 'environment';
@@ -652,30 +935,20 @@
         async function startCamera() {
             stopCamera();
             cameraBox.style.display = 'block';
-            cameraHint.textContent = 'Đang mở camera… trình duyệt có thể hỏi cấp quyền truy cập Camera, bấm Cho phép.';
+            cameraHint.textContent = 'Đang mở camera… vui lòng cấp quyền truy cập máy ảnh.';
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                cameraHint.textContent = 'Trình duyệt không hỗ trợ truy cập Camera, hoặc trang không chạy ở ngữ cảnh an toàn (cần https:// hoặc http://localhost).';
+                cameraHint.textContent = 'Trình duyệt không hỗ trợ truy cập Camera hoặc kết nối chưa an toàn (cần https:// hoặc localhost).';
                 return;
             }
             try {
                 cameraStream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: { ideal: facingMode },
-                        width: { ideal: 3840 },
-                        height: { ideal: 2160 }
-                    },
+                    video: { facingMode: { ideal: facingMode }, width: { ideal: 3840 }, height: { ideal: 2160 } },
                     audio: false
                 });
                 cameraVideo.srcObject = cameraStream;
-
-                const track = cameraStream.getVideoTracks()[0];
-                const settings = track ? track.getSettings() : {};
-                const resText = (settings.width && settings.height)
-                    ? `${settings.width}×${settings.height}`
-                    : 'không xác định';
-                cameraHint.textContent = `Canh chứng từ vào giữa khung hình rồi bấm "Chụp ảnh". (Độ phân giải camera: ${resText})`;
+                cameraHint.textContent = 'Canh tài liệu vào giữa khung hình rồi bấm "Chụp ảnh này".';
             } catch (err) {
-                cameraHint.textContent = 'Không mở được camera: ' + err.message + ' — kiểm tra quyền Camera của trình duyệt / hệ điều hành.';
+                cameraHint.textContent = 'Không mở được camera: ' + err.message;
             }
         }
 
@@ -695,15 +968,14 @@
         });
 
         $('btnSnap').addEventListener('click', () => {
-            if (!cameraStream) { cameraHint.textContent = 'Camera chưa sẵn sàng.'; return; }
+            if (!cameraStream) return;
             const w = cameraVideo.videoWidth, h = cameraVideo.videoHeight;
-            if (!w || !h) { cameraHint.textContent = 'Camera chưa có khung hình, thử lại sau 1 giây.'; return; }
-            cameraCanvas.width = w;
-            cameraCanvas.height = h;
+            if (!w || !h) return;
+            cameraCanvas.width = w; cameraCanvas.height = h;
             cameraCanvas.getContext('2d').drawImage(cameraVideo, 0, 0, w, h);
             cameraCanvas.toBlob((blob) => {
-                if (!blob) { cameraHint.textContent = 'Chụp ảnh thất bại, thử lại.'; return; }
-                const fileName = `camera-capture-${Date.now()}.jpg`;
+                if (!blob) return;
+                const fileName = `camera-${Date.now()}.jpg`;
                 const file = new File([blob], fileName, { type: 'image/jpeg' });
                 setFile(file);
                 stopCamera();
@@ -712,41 +984,116 @@
         });
 
         $('btnUpload').addEventListener('click', async () => {
-            if (!selectedFile) { alert('Chưa chọn file.'); return; }
+            if (!selectedFile) { alert('Vui lòng chọn hoặc chụp ảnh chứng từ trước.'); return; }
             const form = new FormData();
             form.append('file', selectedFile);
             const result = await apiFetch(springBase(), '/api/v1/documents/upload', { method: 'POST', body: form, isForm: true });
             $('uploadResultCard').style.display = 'block';
             $('uploadResultBody').innerHTML = `<div class="lbody">${escapeHtml(JSON.stringify(result.data, null, 2))}</div>`;
             const id = result.data && (result.data.documentId || result.data.id);
-            if (id) $('globalDocId').value = id;
+            if (id) {
+                $('globalDocId').value = id;
+            }
         });
 
-        // ---------------- BƯỚC 2: THEO DÕI ----------------
+        // ---------------- BƯỚC 2: THEO DÕI & VALIDATION REPORT ----------------
         async function trackOnce() {
             const id = currentDocId();
-            if (!id) { alert('Chưa có Document ID — upload ở Bước 1 hoặc dán tay ở ô trên.'); return; }
+            if (!id) { alert('Chưa có Document ID.'); return; }
             const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}`);
             $('trackResultCard').style.display = 'block';
-            if (!result.ok) { $('trackTable').innerHTML = ''; $('trackHint').textContent = 'Lỗi tải trạng thái — xem log.'; return; }
+            if (!result.ok) {
+                $('trackTable').innerHTML = '<tr><td colspan="2" style="color:var(--err)">Lỗi tải trạng thái chứng từ.</td></tr>';
+                $('validationReportContainer').innerHTML = '';
+                return;
+            }
+
             const d = result.data || {};
+            const statusBadge = `<span class="badge ${d.status || ''}">${d.status || '—'}</span>`;
+
             $('trackTable').innerHTML = `
-      <tr><td>status</td><td><span class="badge ${d.status || ''}">${d.status || '—'}</span></td></tr>
-      <tr><td>documentType</td><td>${escapeHtml(d.documentType || '—')}</td></tr>
-      <tr><td>ocrEngine</td><td>${d.ocrEngine ? `<span class="mono">${escapeHtml(d.ocrEngine)}</span>` : '—'}</td></tr>
-      <tr><td>rawOcrText</td><td>${d.rawOcrText ? escapeHtml(d.rawOcrText).slice(0,200) + (d.rawOcrText.length>200?'…':'') : '—'}</td></tr>
-      <tr><td>extractedFields</td><td>${d.extractedFields ? escapeHtml(typeof d.extractedFields === 'string' ? d.extractedFields : JSON.stringify(d.extractedFields)) : '—'}</td></tr>
-    `;
+                <tr><td>Trạng thái (status)</td><td>${statusBadge}</td></tr>
+                <tr><td>Loại chứng từ (documentType)</td><td><strong>${escapeHtml(d.documentType || '—')}</strong></td></tr>
+                <tr><td>Điểm tin cậy (confidenceScore)</td><td><span class="mono">${d.confidenceScore != null ? (d.confidenceScore * 100).toFixed(1) + '%' : '—'}</span></td></tr>
+                <tr><td>Động cơ OCR (ocrEngine)</td><td><span class="mono">${escapeHtml(d.ocrEngine || '—')}</span></td></tr>
+                <tr><td>Quy tắc khớp (matchedBy)</td><td><span class="mono">${escapeHtml(d.matchedBy || '—')}</span> ${d.usedAiFallback ? '<span class="tag-warn">AI Fallback</span>' : ''}</td></tr>
+                <tr><td>Mã công ty bóc tách (companyId)</td><td>${d.companyId ? `${d.companyId} (Khớp: ${d.companyMatchScore != null ? (d.companyMatchScore*100).toFixed(0)+'\%' : ''} qua ${d.companyMatchedBy || '—'})` : '—'}</td></tr>
+                <tr><td>Chủ sở hữu Tenant (ownerCompanyId)</td><td><span class="mono">${d.ownerCompanyId || '—'}</span></td></tr>
+                <tr><td>Người duyệt (reviewedBy)</td><td>${escapeHtml(d.reviewedBy || '—')} ${d.reviewedAt ? `(${d.reviewedAt})` : ''}</td></tr>
+                <tr><td>Văn bản OCR thô (rawOcrText)</td><td>${d.rawOcrText ? escapeHtml(d.rawOcrText).slice(0, 300) + (d.rawOcrText.length > 300 ? '…' : '') : '—'}</td></tr>
+                <tr><td>Trường bóc tách (extractedFields)</td><td><div class="lbody" style="max-height:160px; margin:0">${escapeHtml(typeof d.extractedFields === 'string' ? d.extractedFields : JSON.stringify(d.extractedFields, null, 2))}</div></td></tr>
+            `;
+
+            // Phân tích và render Validation & Business Rule
+            renderValidationReport(d);
+
             $('trackHint').textContent = d.status === 'PROCESSING'
-                ? 'Đang xử lý — nếu kẹt lâu, xem log Spring Boot (OcrQueueConsumer/OcrClientService) và log Python (/predict, /extract).'
-                : '';
+                ? 'Hệ thống đang tiến hành OCR và trích xuất dữ liệu ngầm...'
+                : (d.status === 'NEEDS_REVIEW' ? '⚠ Tài liệu cần được kiểm tra thủ công trước khi duyệt (Confidence thấp hoặc vi phạm quy tắc validation).' : '');
         }
+
+        function renderValidationReport(doc) {
+            let extracted = {};
+            try {
+                if (typeof doc.extractedFields === 'string') extracted = JSON.parse(doc.extractedFields);
+                else if (typeof doc.extractedFields === 'object') extracted = doc.extractedFields;
+            } catch (e) {}
+
+            const container = $('validationReportContainer');
+            if (!extracted || Object.keys(extracted).length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            const isShadowMode = extracted.validator_shadow_mode === true;
+            const hasViolations = extracted.validator_has_violations === true;
+            const errors = Array.isArray(extracted.validator_errors) ? extracted.validator_errors : [];
+            const ungrounded = Array.isArray(extracted.ungrounded_fields) ? extracted.ungrounded_fields : [];
+
+            let html = '';
+            if (hasViolations || errors.length > 0) {
+                html = `
+                    <div class="validation-box ${isShadowMode ? 'warn' : 'err'}">
+                        <strong>🛡 Báo cáo Kiểm tra Quy tắc (Validation Report): ${isShadowMode ? '<span class="tag-warn">SHADOW MODE</span>' : '<span class="tag-err">BLOCKING MODE</span>'}</strong>
+                        <ul>
+                            ${errors.map(err => `<li>${escapeHtml(err)}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            } else if (doc.status === 'VALIDATED' || doc.status === 'APPROVED' || extracted.review_status === 'AUTO_APPROVED') {
+                html = `
+                    <div class="validation-box ok">
+                        <strong>✓ Kiểm tra Business Rule hoàn tất:</strong> Tất cả các trường (MST Check-digit, định dạng Ngày, Khớp số tiền & VAT, Grounding Text) đều đạt chuẩn.
+                    </div>
+                `;
+            }
+
+            if (ungrounded.length > 0) {
+                html += `
+                    <div class="validation-box warn" style="margin-top:8px">
+                        <strong>⚠ Cảnh báo Grounding (Không xuất hiện trong văn bản OCR gốc):</strong>
+                        <div style="margin-top:4px">${ungrounded.map(f => `<span class="tag-err" style="margin-right:4px">${escapeHtml(f)}</span>`).join('')}</div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
         $('btnTrackOnce').addEventListener('click', trackOnce);
         let tracking = false;
         $('btnTrackPoll').addEventListener('click', (e) => {
             tracking = !tracking;
-            if (tracking) { e.target.textContent = 'Tắt tự động'; state.pollTrackTimer = setInterval(trackOnce, 3000); trackOnce(); }
-            else { e.target.textContent = 'Bật tự động (3s)'; clearInterval(state.pollTrackTimer); }
+            if (tracking) {
+                e.target.textContent = 'Dừng tự động';
+                $('trackLiveIndicator').style.display = 'inline-block';
+                state.pollTrackTimer = setInterval(trackOnce, 3000);
+                trackOnce();
+            } else {
+                e.target.textContent = 'Bật tự động (3s)';
+                $('trackLiveIndicator').style.display = 'none';
+                clearInterval(state.pollTrackTimer);
+            }
         });
 
         // ---------------- BƯỚC 3: FILE GỐC ----------------
@@ -756,76 +1103,156 @@
             const result = await apiFetchBinary(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/file`);
             $('filePreviewCard').style.display = 'block';
             const holder = $('filePreviewHolder');
-            if (!result.ok) { holder.innerHTML = '<div class="empty">Không tải được file — xem log.</div>'; return; }
+            if (!result.ok) { holder.innerHTML = '<div class="empty">Không tải được file (kiểm tra quyền hoặc storage).</div>'; return; }
             const url = URL.createObjectURL(result.blob);
             if ((result.contentType || '').startsWith('image/')) {
                 holder.innerHTML = `<img class="preview-img" src="${url}">`;
             } else if ((result.contentType || '').includes('pdf')) {
                 holder.innerHTML = `<iframe class="preview-frame" src="${url}"></iframe>`;
             } else {
-                holder.innerHTML = `<a href="${url}" download="document-${id}">Tải file xuống (${result.contentType || 'không rõ loại'})</a>`;
+                holder.innerHTML = `<a href="${url}" download="document-${id}">Tải file xuống (${result.contentType || 'unknown'})</a>`;
             }
         });
 
         // ---------------- BƯỚC 4: PHÂN LOẠI NHANH ----------------
         async function loadClassifyTextFromDoc() {
-            $('classifyLoadHint').textContent = 'Đang tải...';
+            $('classifyLoadHint').textContent = 'Đang tải rawOcrText...';
             const doc = await fetchCurrentDoc();
             if (!doc) { $('classifyLoadHint').textContent = ''; return; }
-            $('classifyText').value = doc.rawOcrText || '';
-            $('classifyLoadHint').textContent = doc.rawOcrText
-                ? `Đã tải rawOcrText của Document #${doc.id} (documentType hiện tại: ${doc.documentType || '—'})`
-                : 'Document này chưa có rawOcrText (có thể vẫn đang PENDING/PROCESSING).';
+            $('classifyText').value = doc.rawOcrText || '';$('classifyLoadHint').textContent = doc.rawOcrText
+                ? `Đã tải text OCR của Document #${doc.id} (loại hiện tại: ${doc.documentType || '—'})`
+                : 'Document chưa có rawOcrText.';
         }
         $('btnLoadClassifyText').addEventListener('click', loadClassifyTextFromDoc);
 
         $('btnClassify').addEventListener('click', async () => {
             const text = $('classifyText').value.trim();
-            if (!text) { alert('Vui lòng nhập hoặc tải rawOcrText trước khi phân loại.'); return; }
+            if (!text) { alert('Vui lòng nhập hoặc tải rawOcrText trước.'); return; }
 
             const result = await apiFetch(springBase(), '/api/v1/documents/classify', {
                 method: 'POST',
-                body: { rawOcrText: text, rawText: text }
+                body: { rawOcrText: text }
             });
 
             $('classifyResultCard').style.display = 'block';
             if (!result.ok) {
-                $('classifyTable').innerHTML = `<tr><td colspan="2" style="color:var(--err)">Không phân loại được (status ${result.status || 'ERR'}) — kiểm tra log API.</td></tr>`;
+                $('classifyTable').innerHTML = `<tr><td colspan="2" style="color:var(--err)">Không phân loại được (status ${result.status}).</td></tr>`;
                 return;
             }
 
             const d = result.data || {};
-            const docType = d.documentType || d.type || d.predictedType || 'OTHER';
-            const confidence = d.confidenceScore !== undefined ? d.confidenceScore : (d.confidence !== undefined ? d.confidence : '—');
-            const matchedBy = d.matchedBy || d.matchedRule || d.method || '—';
+            const docType = d.documentType || d.type || 'OTHER';
+            const confidence = d.confidenceScore != null ? (d.confidenceScore * 100).toFixed(1) + '%' : (d.confidence != null ? d.confidence : '—');
+            const matchedBy = d.matchedBy || d.matchedRule || '—';
 
             $('classifyTable').innerHTML = `
-                <tr><td>documentType</td><td><span class="badge APPROVED">${escapeHtml(docType)}</span></td></tr>
-                <tr><td>confidenceScore</td><td><span class="mono">${escapeHtml(confidence)}</span></td></tr>
-                <tr><td>matchedBy</td><td><span class="mono">${escapeHtml(matchedBy)}</span></td></tr>
+                <tr><td>Loại tài liệu dự đoán</td><td><span class="badge APPROVED">${escapeHtml(docType)}</span></td></tr>
+                <tr><td>Độ tin cậy (Confidence)</td><td><span class="mono">${escapeHtml(confidence)}</span></td></tr>
+                <tr><td>Phương thức khớp (Matched By)</td><td><span class="mono">${escapeHtml(matchedBy)}</span></td></tr>
             `;
         });
 
-        // ---------------- BƯỚC 5: SỬA FIELD ----------------
+        // ---------------- BƯỚC 5: SỬA FIELD & AUDIT ----------------
+        // ---------------- BƯỚC 5: SỬA FIELD & AUDIT ----------------
         async function loadEditFieldsFromDoc() {
-            $('editLoadHint').textContent = 'Đang tải...';
+            $('editLoadHint').textContent = 'Đang tải dữ liệu...';
             const doc = await fetchCurrentDoc();
             if (!doc) { $('editLoadHint').textContent = ''; return; }
 
-            if (['NEED_REVIEW', 'PENDING', 'REJECTED'].includes(doc.status)) {
+            const validStatuses = [
+                'PENDING', 'PROCESSING', 'OCR_DONE', 'CLASSIFIED',
+                'EXTRACTED', 'VALIDATED', 'NEEDS_REVIEW',
+                'APPROVED', 'REJECTED_QUALITY', 'FAILED'
+            ];
+            if (validStatuses.includes(doc.status)) {
                 $('editStatus').value = doc.status;
             }
 
-            let pretty = '{}';
+            let parsed = {};
             try {
-                const parsed = doc.extractedFields ? JSON.parse(doc.extractedFields) : {};
-                pretty = JSON.stringify(parsed, null, 2);
+                parsed = doc.extractedFields ? (typeof doc.extractedFields === 'string' ? JSON.parse(doc.extractedFields) : doc.extractedFields) : {};
             } catch (e) {
-                pretty = doc.extractedFields || '{}';
+                console.warn("Không parse được JSON:", e);
             }
-            $('editFields').value = pretty;
-            $('editLoadHint').textContent = `Đã tải extractedFields của Document #${doc.id} (status: ${doc.status || '—'}) — sửa lại giá trị sai rồi gửi PUT.`;
+
+            // 1. Render giao diện Input động từ JSON
+            const container = $('dynamicFieldsContainer');
+            container.innerHTML = ''; // Xóa trắng dữ liệu cũ
+
+            const keys = Object.keys(parsed);
+            if (keys.length === 0) {
+                container.innerHTML = '<div class="empty" style="width:100%">Không có trường dữ liệu nào được bóc tách.</div>';
+            } else {
+                keys.forEach(key => {
+                    // Bỏ qua các trường log hệ thống của OCR (nếu không muốn sửa)
+                    if (key.startsWith('validator_') || key === 'review_status') return;
+
+                    const fieldDiv = document.createElement('div');
+                    fieldDiv.className = 'field';
+                    fieldDiv.style.flex = '1 1 45%'; // Chia làm 2 cột
+
+                    const label = document.createElement('label');
+                    label.textContent = key; // Tên key (có thể map sang tiếng Việt nếu gọi API Template_Config sau này)
+
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.className = 'dynamic-edit-input';
+                    input.dataset.key = key; // Gắn key vào dataset để lúc submit lấy lại
+                    input.value = parsed[key] !== null ? parsed[key] : '';
+
+                    fieldDiv.appendChild(label);
+                    fieldDiv.appendChild(input);
+                    container.appendChild(fieldDiv);
+                });
+            }
+
+            // Lưu dự phòng vào thẻ ẩn
+            $('editFields').value = JSON.stringify(parsed, null, 2);$('editLoadHint').textContent = `Đã tải ${keys.length} trường của Document #${doc.id} (Status: ${doc.status || '—'}).`;
         }
+
+        $('btnLoadEditFields').addEventListener('click', loadEditFieldsFromDoc);
+
+        $('btnSubmitEdit').addEventListener('click', async () => {
+            const id = currentDocId();
+            if (!id) { alert('Chưa có Document ID.'); return; }
+            const status = $('editStatus').value;
+
+            // 2. Gom dữ liệu từ các ô input ngược lại thành JSON
+            let extractedFields = {};
+            const dynamicInputs = document.querySelectorAll('.dynamic-edit-input');
+
+            if (dynamicInputs.length > 0) {
+                dynamicInputs.forEach(input => {
+                    extractedFields[input.dataset.key] = input.value.trim();
+                });
+
+                // Giữ lại các trường hệ thống cũ (như validator_errors) để không bị mất
+                try {
+                    const oldData = JSON.parse($('editFields').value || '{}');
+                    Object.keys(oldData).forEach(k => {
+                        if (k.startsWith('validator_') || k === 'review_status' || k === 'ungrounded_fields') {
+                            extractedFields[k] = oldData[k];
+                        }
+                    });
+                } catch(e) {}
+            } else {
+                // Fallback trường hợp parse lỗi, dùng textarea ẩn
+                const fieldsStr = $('editFields').value.trim();
+                if (fieldsStr) {
+                    try { extractedFields = JSON.parse(fieldsStr); }
+                    catch(e) { alert('extractedFields JSON không hợp lệ: ' + e.message); return; }
+                }
+            }
+
+            // Gửi PUT Request lên Server
+            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}`, {
+                method: 'PUT',
+                body: { status, extractedFields: JSON.stringify(extractedFields) }
+            });
+
+            $('editResultCard').style.display = 'block';$('editResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
+        });
+
         $('btnLoadEditFields').addEventListener('click', loadEditFieldsFromDoc);
 
         $('btnSubmitEdit').addEventListener('click', async () => {
@@ -843,52 +1270,69 @@
                 method: 'PUT',
                 body: { status, extractedFields: JSON.stringify(extractedFields) }
             });
-            $('editResultCard').style.display = 'block';
-            $('editResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
+            $('editResultCard').style.display = 'block';$('editResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
         });
 
-        // ---------------- BƯỚC 6: DUYỆT ----------------
+        // ---------------- BƯỚC 6: DUYỆT (APPROVE) ----------------
         async function loadApproveSuggestionFromDoc() {
             $('approveLoadHint').textContent = 'Đang tra cứu gợi ý từ OCR...';
             const id = currentDocId();
             if (!id) { $('approveLoadHint').textContent = ''; return; }
 
-            const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/company-suggestion`);
-            if (!result.ok) {
-                $('approveLoadHint').textContent = `Không lấy được gợi ý (status ${result.status || 'network error'}) — điền tay bên dưới.`;
-                return;
+            // Lấy song song document detail & company suggestion
+            const [docRes, suggRes] = await Promise.all([
+                apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}`),
+                apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/company-suggestion`)
+            ]);
+
+            const doc = docRes.ok ? docRes.data : {};
+            const suggestion = suggRes.ok ? suggRes.data : {};
+
+            if (doc.documentType) {
+                $('approveType').value = doc.documentType;
             }
-            const suggestion = result.data || {};
-            $('approveBody').value = JSON.stringify({
-                taxCode: suggestion.taxCode || '',
-                companyName: suggestion.companyName || ''
-            }, null, 2);
-            $('approveContactName').value = suggestion.contactName || '';
-            $('approveContactTitle').value = suggestion.contactTitle || '';
+
+            $('approveTaxCode').value = suggestion.taxCode || doc.taxCode || '';$('approveCompanyName').value = suggestion.companyName || '';
+            $('approveContactName').value = doc.contactName || suggestion.contactName || '';$('approveContactTitle').value = suggestion.contactTitle || doc.contactTitle || '';
+
+            let fieldsObj = {};
+            try {
+                if (doc.extractedFields) {
+                    fieldsObj = typeof doc.extractedFields === 'string' ? JSON.parse(doc.extractedFields) : doc.extractedFields;
+                }
+            } catch (e) {}
+            $('approveUpdatedFields').value = JSON.stringify(fieldsObj, null, 2);
 
             $('approveLoadHint').textContent = (suggestion.taxCode || suggestion.companyName)
-                ? 'Đã điền gợi ý từ OCR — kiểm tra lại trước khi duyệt (đây chỉ là gợi ý, không đảm bảo chính xác 100%).'
-                : 'OCR không tìm được taxCode/companyName rõ ràng — điền tay bên dưới.';
+                ? '✓ Đã điền gợi ý từ OCR — vui lòng xác nhận hoặc chỉnh sửa thông tin trước khi Duyệt.'
+                : 'OCR không trích xuất được MST/Tên công ty rõ ràng — vui lòng nhập tay.';
         }
         $('btnLoadApproveSuggestion').addEventListener('click', loadApproveSuggestionFromDoc);
 
         $('btnApprove').addEventListener('click', async () => {
             const id = currentDocId();
             if (!id) { alert('Chưa có Document ID.'); return; }
-            const docType = $('approveType').value;
+            const approvedType = $('approveType').value;
+            const taxCode = $('approveTaxCode').value.trim();
+            const companyName = $('approveCompanyName').value.trim();
             const contactName = $('approveContactName').value.trim();
             const contactTitle = $('approveContactTitle').value.trim();
 
-            let body = {};
-            const bodyStr = $('approveBody').value.trim();
-            if (bodyStr) {
-                try { body = JSON.parse(bodyStr); }
-                catch(e) { alert('Body JSON không hợp lệ: ' + e.message); return; }
+            let updatedFields = {};
+            const fieldsStr = $('approveUpdatedFields').value.trim();
+            if (fieldsStr) {
+                try { updatedFields = JSON.parse(fieldsStr); }
+                catch(e) { alert('updatedFields JSON không hợp lệ: ' + e.message); return; }
             }
 
-            body.documentType = docType;
-            if (contactName) body.contactName = contactName;
-            if (contactTitle) body.contactTitle = contactTitle;
+            const body = {
+                approvedType,
+                taxCode: taxCode || null,
+                companyName: companyName || null,
+                contactName: contactName || null,
+                contactTitle: contactTitle || null,
+                updatedFields
+            };
 
             const result = await apiFetch(springBase(), `/api/v1/documents/${encodeURIComponent(id)}/approve`, {
                 method: 'POST',
@@ -898,48 +1342,141 @@
             $('approveResultCard').style.display = 'block';
             if (result.ok && result.data) {
                 const res = result.data;
-                // Backend trả company info lồng trong res.company, không phải top-level
                 const company = res.company || {};
+                const taxLookup = res.taxLookup || {};
+
                 $('approveCompanyTable').innerHTML = `
-                    <tr><td>Mã số thuế</td><td>${escapeHtml(company.taxCode || '—')}</td></tr>
-                    <tr><td>Tên công ty</td><td>${escapeHtml(company.legalName || company.companyName || '—')}</td></tr>
-                    <tr><td>Địa chỉ</td><td>${escapeHtml(company.address || '—')}</td></tr>
+                    <tr><td>Mã số thuế (Tax Code)</td><td><strong>${escapeHtml(company.taxCode || taxCode || '—')}</strong></td></tr>
+                    <tr><td>Tên pháp lý (Legal Name)</td><td><strong>${escapeHtml(company.legalName || company.companyName || companyName || '—')}</strong></td></tr>
+                    <tr><td>Tên chuẩn hóa (Normalized)</td><td>${escapeHtml(company.normalizedName || '—')}</td></tr>
+                    <tr><td>Độ khớp & Nguồn</td><td><span class="tag-ok">${company.matchedBy || '—'}</span> (Score: ${company.matchScore != null ? (company.matchScore*100).toFixed(0)+'%' : '—'})</td></tr>
                 `;
+
+                $('approveTaxLookupTable').innerHTML = `
+                    <tr><td>Trạng thái tra cứu thuế</td><td>${taxLookup.taxCode ? '<span class="tag-ok">ĐÃ TÌM THẤY TRÊN CSDL THUẾ / VIETQR</span>' : '<span class="tag-warn">CHƯA XÁC THỰC THUẾ</span>'}</td></tr>
+                    <tr><td>Tên trên cổng thuế</td><td>${escapeHtml(taxLookup.legalName || '—')}</td></tr>
+                    <tr><td>Địa chỉ đăng ký thuế</td><td>${escapeHtml(taxLookup.address || '—')}</td></tr>
+                `;
+
                 const industries = Array.isArray(company.suggestedIndustries) ? company.suggestedIndustries : [];
-                $('approveIndustryList').textContent = industries.length ? industries.join(', ') : '—';
-                $('approveResultBody').textContent = JSON.stringify(res, null, 2);
-            } else {
-                $('approveResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
+                if (industries.length > 0) {
+                    $('approveIndustryList').innerHTML = industries.map(ind => `
+                        <div style="margin-bottom:4px">
+                            <span class="mono tag-info">${escapeHtml(ind.code)}</span> <strong>${escapeHtml(ind.name)}</strong>
+                        </div>
+                    `).join('');
+                } else {
+                    $('approveIndustryList').textContent = 'Không có gợi ý ngành nghề hoặc chưa tìm thấy.';
+                }
+
+                $('approveResultBody').textContent = JSON.stringify(res, null, 2);             } else {$('approveResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
             }
         });
 
-        // ---------------- BƯỚC 7: EXPORT ----------------
+        // ---------------- BƯỚC 7: EXPORT EXCEL ----------------
         $('btnExport').addEventListener('click', async () => {
             const result = await apiFetchBinary(springBase(), '/api/v1/documents/export');
-            if (!result.ok) { $('exportResult').innerHTML = '<div class="empty">Tải thất bại — xem log.</div>'; return; }
+            if (!result.ok) { $('exportResult').innerHTML = '<div class="empty" style="color:var(--err)">Tải báo cáo thất bại — xem log.</div>'; return; }
             const url = URL.createObjectURL(result.blob);
             const a = document.createElement('a');
-            a.href = url; a.download = 'bizocr-export.xlsx';
+            a.href = url; a.download = 'bao_cao_ke_toan.xlsx';
             document.body.appendChild(a); a.click(); a.remove();
-            $('exportResult').innerHTML = `<div class="hint" style="margin-top:10px">Đã tải file (${(result.blob.size/1024).toFixed(1)} KB).</div>`;
+            $('exportResult').innerHTML = `<div class="hint" style="margin-top:10px; color:var(--ok)">✓ Đã tải file bao_cao_ke_toan.xlsx thành công (${(result.blob.size/1024).toFixed(1)} KB).</div>`;
         });
 
-        // ---------------- TEMPLATE RELOAD ----------------
+        // ---------------- DANH SÁCH CHỨNG TỪ (DOCUMENTS LIST) ----------------
+        async function loadDocumentList(page = 0) {
+            state.currentPage = page;
+            const status = $('filterStatus').value;
+            const documentType = $('filterType').value;
+            const size = parseInt($('filterSize').value) || 10;
+            state.pageSize = size;
+
+            let query = `?page=${page}&size=${size}`;
+            if (status) query += `&status=${encodeURIComponent(status)}`;
+            if (documentType) query += `&documentType=${encodeURIComponent(documentType)}`;
+
+            const result = await apiFetch(springBase(), `/api/v1/documents${query}`);
+            const tbody = $('docListBody');
+
+            if (!result.ok) {
+                tbody.innerHTML = `<tr><td colspan="7" class="empty" style="color:var(--err)">Không thể tải danh sách (Status: ${result.status}).</td></tr>`;
+                $('paginationBar').style.display = 'none';
+                return;
+            }
+
+            const data = result.data || {};
+            const items = data.items || [];
+            state.totalPages = data.totalPages || 1;
+
+            if (items.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="empty">Không tìm thấy chứng từ nào phù hợp với bộ lọc.</td></tr>`;
+                $('paginationBar').style.display = 'none';
+                return;
+            }
+
+            tbody.innerHTML = items.map(doc => `
+                <tr data-docid="${doc.id}">
+                    <td><span class="mono" style="color:var(--accent); font-weight:600">#${doc.id}</span></td>
+                    <td>${escapeHtml(doc.fileName || '—')}</td>
+                    <td>${escapeHtml(doc.documentType || '—')}</td>
+                    <td><span class="badge ${doc.status || ''}">${doc.status || '—'}</span></td>
+                    <td><span class="mono">${doc.confidenceScore != null ? (doc.confidenceScore * 100).toFixed(0) + '%' : '—'}</span></td>
+                    <td style="color:var(--muted); font-size:11.5px">${escapeHtml(doc.receivedAt || '—')}</td>
+                    <td>
+                        <button class="secondary small btn-select-doc" data-id="${doc.id}">Chọn ID</button>
+                    </td>
+                </tr>
+            `).join('');
+
+            // Pagination Controls
+            $('paginationBar').style.display = 'flex';$('pageInfo').textContent = `Trang ${data.page + 1} / ${data.totalPages} (Tổng cộng: ${data.totalElements} chứng từ)`;
+            $('btnPrevPage').disabled = data.page <= 0;
+            $('btnNextPage').disabled = data.page >= data.totalPages - 1;
+
+            // Row click event
+            tbody.querySelectorAll('tr').forEach(row => {
+                row.addEventListener('click', (e) => {
+                    const id = row.dataset.docid;
+                    if (id) {
+                        $('globalDocId').value = id;
+                        if (e.target.classList.contains('btn-select-doc')) {
+                            // Chuyển sang Bước 2
+                            document.querySelector('.nav-item[data-tab="track"]').click();
+                        }
+                    }
+                });
+            });
+        }
+
+        $('btnSearchDocs').addEventListener('click', () => loadDocumentList(0));
+        $('btnPrevPage').addEventListener('click', () => { if (state.currentPage > 0) loadDocumentList(state.currentPage - 1); });$('btnNextPage').addEventListener('click', () => { if (state.currentPage < state.totalPages - 1) loadDocumentList(state.currentPage + 1); });
+
+        // ---------------- CẤU HÌNH TEMPLATE ----------------
         $('btnReloadTemplate').addEventListener('click', async () => {
             const result = await apiFetch(springBase(), '/api/v1/templates/reload', { method: 'POST' });
-            $('templateResultCard').style.display = 'block';
-            $('templateResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
+            $('templateResultCard').style.display = 'block';$('templateResultBody').textContent = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
         });
 
-        // ---------------- CUSTOM ----------------
+        // ---------------- CUSTOM REQUEST ----------------
         $('btnCustomSend').addEventListener('click', async () => {
             const method = $('customMethod').value;
             const path = $('customPath').value.trim();
-            if (!path) { alert('Nhập path.'); return; }
+            if (!path) { alert('Vui lòng nhập URL path.'); return; }
             let body = null;
             const raw = $('customBody').value.trim();
-            if (raw) { try { body = JSON.parse(raw); } catch (e) { alert('Body JSON không hợp lệ: ' + e.message); return; } }
+            if (raw) {
+                try { body = JSON.parse(raw); }
+                catch (e) { alert('Body JSON không hợp lệ: ' + e.message); return; }
+            }
             await apiFetch(springBase(), path, { method, body });
+        });
+
+        // Tự động khôi phục đăng nhập nếu đã có Token trong LocalStorage
+        window.addEventListener('DOMContentLoaded', () => {
+            if (state.token) {
+                enterApp(state.token);
+            }
         });
     })();
 </script>

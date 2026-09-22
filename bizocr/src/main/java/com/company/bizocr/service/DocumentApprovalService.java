@@ -107,7 +107,8 @@ public class DocumentApprovalService {
                                                 .onErrorResume(e -> Mono.just(false));
 
                                         // 3. Google Search Suggested Industries Mono
-                                        Mono<List<CompanyIndustryDetail>> suggestedIndustriesMono = externalTaxSearchService
+                                        Mono<List<CompanyIndustryDetail>> suggestedIndustriesMono = (company.getLegalName() != null && !company.getLegalName().isBlank())
+                                                ? externalTaxSearchService
                                                 .searchCompanyInfoOnline(company.getLegalName(), null)
                                                 .flatMapMany(result -> industryRepository.findByCodeInAndIsActiveTrue(result.industryCodeCandidates()))
                                                 .map(industry -> CompanyIndustryDetail.builder()
@@ -119,7 +120,8 @@ public class DocumentApprovalService {
                                                 .onErrorResume(e -> {
                                                     log.warn("[Approve] Bỏ qua gợi ý ngành nghề do lỗi Search API: {}", e.getMessage());
                                                     return Mono.just(List.of());
-                                                });
+                                                })
+                                                : Mono.just(List.of()); // Trả về list rỗng nếu không có tên công ty
 
                                         // Zip song song: audit + ML + industries, rồi mới transition FSM
                                         return Mono.zip(auditMono, collectMlDataMono, suggestedIndustriesMono)
@@ -174,7 +176,10 @@ public class DocumentApprovalService {
         String finalTaxCode = (tax.getTaxCode() != null) ? tax.getTaxCode() : req.getTaxCode();
         String finalName = (tax.getLegalName() != null) ? tax.getLegalName() : req.getCompanyName();
 
-        String normalizedTaxCode = nameNormalizer.normalizeTaxCode(finalTaxCode);
+        // Thêm kiểm tra null trước khi normalize
+        String normalizedTaxCode = (finalTaxCode != null && !finalTaxCode.isBlank())
+                ? nameNormalizer.normalizeTaxCode(finalTaxCode)
+                : "";
 
         if (!normalizedTaxCode.isBlank()) {
             return upsertByTaxCode(normalizedTaxCode, finalName, req, tax);
@@ -189,7 +194,7 @@ public class DocumentApprovalService {
                     // Nếu Tax API trả về MST hợp lệ hoặc người duyệt xác thực, nâng cấp trạng thái thành VERIFIED
                     if (tax.getTaxCode() != null || req.getTaxCode() != null) {
                         existingCompany.setLegalName(finalName);
-                        existingCompany.setNormalizedName(nameNormalizer.normalize(finalName));
+                        existingCompany.setNormalizedName(finalName != null ? nameNormalizer.normalize(finalName) : "");
                         if (tax.getAddress() != null && !tax.getAddress().isBlank()) {
                             existingCompany.setAddress(tax.getAddress());
                         }
@@ -205,7 +210,7 @@ public class DocumentApprovalService {
                     Company newCompany = Company.builder()
                             .taxCode(normalizedTaxCode)
                             .legalName(finalName)
-                            .normalizedName(nameNormalizer.normalize(finalName))
+                            .normalizedName(finalName != null ? nameNormalizer.normalize(finalName) : "")
                             .shortName(req.getCompanyName())
                             .address(tax.getAddress())
                             .active(true)

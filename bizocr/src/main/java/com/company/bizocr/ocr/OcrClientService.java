@@ -19,7 +19,7 @@ import java.time.Duration;
 public class OcrClientService {
 
     private static final String OCR_ENDPOINT = "/api/v1/ocr";
-    private static final Duration OCR_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration OCR_TIMEOUT = Duration.ofSeconds(180);
 
     private final WebClient ocrWebClient;
 
