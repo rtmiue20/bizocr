@@ -150,7 +150,7 @@ public class PipelineOrchestrator {
                                                                         DocumentStatus.EXTRACTED)
                                                                 .flatMap(r -> handleMismatch(r, record, DocumentStatus.EXTRACTED))
 
-                                                                // ── Step 6: Quyết định VALIDATED vs NEEDS_REVIEW
+                                                                // ── Step 6: Quyết định VALIDATED vs NEED_REVIEW
                                                                 .then(Mono.defer(() -> {
                                                                     boolean lowConfidence =
                                                                             classifyResult.getConfidenceScore() == null
@@ -176,14 +176,14 @@ public class PipelineOrchestrator {
                                                                             || fieldsIncomplete
                                                                             || !companyInfo.isFound()
                                                                             || hasValidationReviewRequirement) {
-                                                                        // → NEEDS_REVIEW
+                                                                        // → NEED_REVIEW
                                                                         return stateMachine.transition(
                                                                                 record.getId(),
                                                                                 DocumentStatus.EXTRACTED,
-                                                                                DocumentStatus.NEEDS_REVIEW)
-                                                                                .flatMap(r -> handleMismatch(r, record, DocumentStatus.NEEDS_REVIEW))
+                                                                                DocumentStatus.NEED_REVIEW)
+                                                                                .flatMap(r -> handleMismatch(r, record, DocumentStatus.NEED_REVIEW))
                                                                                 .then(Mono.defer(() -> {
-                                                                                    record.setStatus(DocumentStatus.NEEDS_REVIEW.name());
+                                                                                    record.setStatus(DocumentStatus.NEED_REVIEW.name());
                                                                                     return persistRecord(record);
                                                                                 }));
                                                                     } else {

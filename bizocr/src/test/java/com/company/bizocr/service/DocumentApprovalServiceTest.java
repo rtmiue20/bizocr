@@ -92,7 +92,7 @@ class DocumentApprovalServiceTest {
     private Document existingDoc() {
         Document doc = new Document();
         doc.setId(42L);
-        doc.setStatus(DocumentStatus.NEEDS_REVIEW.name());
+        doc.setStatus(DocumentStatus.NEED_REVIEW.name());
         doc.setRawOcrText("CONG TY ABC");
         return doc;
     }

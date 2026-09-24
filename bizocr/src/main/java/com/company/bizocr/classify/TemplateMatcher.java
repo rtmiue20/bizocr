@@ -262,7 +262,7 @@ public class TemplateMatcher {
 
         // 8. Danh thiếp (Name Card)
         registerTemplate(DocumentTemplate.builder()
-                .documentType("NAME_CARD")
+                .documentType("NAMECARD")
                 .displayName("Danh thiếp / Card Visit")
                 .category("IDENTITY")
                 .priority(9)

@@ -1,0 +1,649 @@
+/* Mọi selector đều bắt đầu bằng .lg để không bị styles.css toàn cục đè */
+.lg {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 28px;
+    font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+    color: #f1f5f9;
+    user-select: none;
+    background: radial-gradient(circle at 30% 45%, #2a2824 0%, #17171a 50%, #0d0e11 100%);
+    transition: background .8s ease;
+}
+
+.lg.off {
+    background: #08080a;
+}
+
+.lg * {
+    box-sizing: border-box;
+}
+
+.lg button {
+    font: inherit;
+    cursor: pointer;
+    border: 0;
+    background: none;
+    padding: 0;
+    color: inherit;
+}
+
+.lg h2, .lg h3, .lg p {
+    margin: 0;
+}
+
+.lg-shell {
+    width: 100%;
+    max-width: 1152px;
+    min-height: 660px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background: rgba(20, 21, 26, .9);
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 32px;
+    overflow: hidden;
+    box-shadow: 0 30px 60px -12px rgba(0, 0, 0, .7);
+}
+
+@media (min-width: 1024px) {
+    .lg-shell {
+        height: 720px;
+    }
+}
+
+.lg .lg-hide {
+    transition: opacity .5s ease, visibility .5s;
+}
+
+.lg.off .lg-hide {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* Header */
+.lg-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, .05);
+}
+
+.lg-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.lg-brand strong {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: .05em;
+}
+
+.lg-brand p {
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+.lg-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 16px;
+    display: grid;
+    place-items: center;
+    color: #fcd34d;
+    background: rgba(251, 191, 36, .1);
+    border: 1px solid rgba(251, 191, 36, .3);
+}
+
+.lg .material-symbols-outlined {
+    font-size: 20px;
+}
+
+.lg .lg-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fcd34d;
+    background: rgba(255, 255, 255, .05);
+    border: 1px solid rgba(251, 191, 36, .3);
+}
+
+.lg.off .lg-badge {
+    color: #94a3b8;
+    border-color: rgba(255, 255, 255, .1);
+}
+
+.lg-badge i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #64748b;
+}
+
+.lg-badge i.pulse {
+    background: #fbbf24;
+    animation: lgPulse 2s ease-in-out infinite;
+}
+
+@keyframes lgPulse {
+    50% {
+        opacity: .4;
+    }
+}
+
+/* Layout */
+.lg-main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr;
+    overflow: hidden;
+}
+
+@media (min-width: 1024px) {
+    .lg-main {
+        grid-template-columns: 5fr 7fr;
+    }
+}
+
+.lg-left {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 32px;
+    overflow: hidden;
+    border-bottom: 1px solid rgba(255, 255, 255, .05);
+}
+
+@media (min-width: 1024px) {
+    .lg-left {
+        border-bottom: 0;
+        border-right: 1px solid rgba(255, 255, 255, .05);
+    }
+}
+
+.lg-right {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    overflow-y: auto;
+}
+
+.lg-beam {
+    position: absolute;
+    top: -20%;
+    left: 10%;
+    width: 100%;
+    height: 140%;
+    pointer-events: none;
+    transition: opacity .6s;
+    background: radial-gradient(ellipse at 25% 42%, rgba(254, 240, 199, .22) 0%, rgba(217, 160, 90, .12) 32%, rgba(13, 14, 17, 0) 70%);
+}
+
+.lg.off .lg-beam {
+    opacity: 0;
+}
+
+.lg-caption {
+    position: relative;
+    z-index: 2;
+    margin-top: 8px;
+}
+
+.lg-caption h3 {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: rgba(252, 211, 77, .9);
+    margin-bottom: 4px;
+}
+
+.lg-caption p {
+    font-size: 12px;
+    line-height: 1.6;
+    color: #94a3b8;
+    max-width: 24rem;
+}
+
+.lg-foot {
+    padding: 10px 24px;
+    border-top: 1px solid rgba(255, 255, 255, .05);
+    background: rgba(20, 21, 26, .8);
+    font-size: 11px;
+    color: rgba(148, 163, 184, .8);
+    text-align: right;
+}
+
+/* Đèn nấm */
+.lg-lamp {
+    position: relative;
+    z-index: 2;
+    flex: 1;
+    display: grid;
+    place-items: center;
+    min-height: 320px;
+}
+
+.lg-lampbody {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.lg-dome {
+    position: relative;
+    z-index: 2;
+    width: 208px;
+    height: 96px;
+    border-radius: 104px 104px 0 0;
+    background: #fff;
+    cursor: pointer;
+    box-shadow: 0 0 50px rgba(255, 255, 255, .85), 0 0 100px rgba(254, 240, 199, .6), 0 0 160px rgba(226, 183, 85, .35);
+    transition: all .5s;
+}
+
+.lg-stem {
+    z-index: 1;
+    width: 16px;
+    height: 144px;
+    margin-top: -4px;
+    background: #f1f5f9;
+    transition: background .5s;
+}
+
+.lg-base {
+    z-index: 1;
+    width: 144px;
+    height: 16px;
+    margin-top: -2px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    border-top: 1px solid rgba(255, 255, 255, .8);
+    box-shadow: 0 20px 25px rgba(0, 0, 0, .4);
+    transition: background .5s;
+}
+
+.lg.off .lg-dome {
+    background: #25272e;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, .8);
+    filter: brightness(.5);
+}
+
+.lg.off .lg-stem, .lg.off .lg-base {
+    background: #1c1d22;
+}
+
+.lg .lg-cord {
+    position: absolute;
+    left: 142px;
+    top: 90px;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px;
+    transform-origin: top center;
+    animation: lgSway 4s ease-in-out infinite;
+    touch-action: none;
+}
+
+.lg-cord .line {
+    width: 1.5px;
+    height: 78px;
+    background: #cbd5e1;
+    transition: background .2s;
+}
+
+.lg-cord .bead {
+    width: 20px;
+    height: 20px;
+    margin-top: -2px;
+    border-radius: 50%;
+    transition: transform .2s, box-shadow .2s;
+    background: radial-gradient(circle at 35% 30%, #ecd0b5 0%, #d9a07a 50%, #9a613c 100%);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, .6), 0 0 6px rgba(236, 208, 181, .25);
+}
+
+.lg-cord:hover .line {
+    background: #fde68a;
+}
+
+.lg-cord:hover .bead {
+    transform: scale(1.18);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, .8), 0 0 12px rgba(251, 191, 36, .6);
+}
+
+.lg .lg-cord:focus-visible {
+    outline: 2px solid #fbbf24;
+    outline-offset: 2px;
+    border-radius: 8px;
+}
+
+.lg .lg-cord.pull {
+    animation: lgPull .55s cubic-bezier(.25, 1.4, .5, 1);
+}
+
+@keyframes lgSway {
+    25% {
+        transform: rotate(1.2deg);
+    }
+    75% {
+        transform: rotate(-1.2deg);
+    }
+}
+
+@keyframes lgPull {
+    30% {
+        transform: translateY(32px) scaleY(1.15);
+    }
+    50% {
+        transform: translateY(38px) scaleY(1.2);
+    }
+    68% {
+        transform: translateY(-8px) scaleY(.92) rotate(-2deg);
+    }
+    82% {
+        transform: translateY(5px) scaleY(1.04) rotate(1.5deg);
+    }
+    92% {
+        transform: translateY(-2px) scaleY(.98);
+    }
+}
+
+/* Viền RGB chạy quanh thẻ khi đang nhập */
+.lg-rgb {
+    position: relative;
+    width: 100%;
+    max-width: 448px;
+    margin: auto;
+    padding: 2.5px;
+    border-radius: 34px;
+    isolation: isolate;
+    overflow: hidden;
+    background: rgba(255, 255, 255, .08);
+}
+
+.lg-rgb::before, .lg-rgb::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .5s;
+    background: conic-gradient(#ff0055, #ff7700, #ffea00, #00ff66, #00ffff, #0055ff, #aa00ff, #ff00aa, #ff0055);
+    animation: lgSpin 4s linear infinite;
+}
+
+.lg-rgb::before {
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    z-index: 0;
+}
+
+.lg-rgb::after {
+    top: -15%;
+    left: -15%;
+    width: 130%;
+    height: 130%;
+    filter: blur(28px);
+    z-index: -1;
+}
+
+.lg-rgb:focus-within::before {
+    opacity: 1;
+}
+
+.lg-rgb:focus-within::after {
+    opacity: .65;
+}
+
+@keyframes lgSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.lg-glass {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 12px;
+    padding: 20px;
+    border-radius: 32px;
+    background: rgba(22, 24, 30, .94);
+    backdrop-filter: blur(28px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+
+.lg-welcome {
+    text-align: center;
+}
+
+.lg-welcome h2 {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+}
+
+.lg-welcome p {
+    font-size: 12px;
+    color: #94a3b8;
+    margin-top: 2px;
+}
+
+.lg-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 16px;
+    background: rgba(0, 0, 0, .4);
+    border: 1px solid rgba(255, 255, 255, .1);
+}
+
+.lg .lg-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 16px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #94a3b8;
+    transition: all .2s;
+}
+
+.lg-tab .material-symbols-outlined {
+    font-size: 15px;
+}
+
+.lg .lg-tab:hover {
+    color: #fff;
+}
+
+.lg .lg-tab.on {
+    background: rgba(255, 255, 255, .15);
+    color: #fff;
+    font-weight: 700;
+}
+
+.lg-form {
+    display: grid;
+    gap: 10px;
+}
+
+.lg-sub {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(253, 230, 138, .9);
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, .05);
+}
+
+.lg-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+
+@media (min-width: 520px) {
+    .lg-row {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+.lg .lg-label {
+    display: grid;
+    gap: 2px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #cbd5e1;
+}
+
+.lg-label b {
+    color: #fbbf24;
+    font-weight: 500;
+}
+
+.lg-field {
+    position: relative;
+    display: block;
+}
+
+.lg .lg-field .material-symbols-outlined {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+    color: #94a3b8;
+    pointer-events: none;
+}
+
+.lg .lg-input {
+    width: 100%;
+    padding: 8px 32px 8px 12px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    color: #f8fafc;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .05);
+    border: 1px solid rgba(255, 255, 255, .14);
+    transition: all .25s;
+}
+
+.lg .lg-input.mono {
+    font-family: "JetBrains Mono", monospace;
+}
+
+.lg .lg-input::placeholder {
+    color: rgba(148, 163, 184, .55);
+}
+
+.lg .lg-input:hover {
+    background: rgba(255, 255, 255, .08);
+    border-color: rgba(255, 255, 255, .24);
+}
+
+.lg .lg-input:focus, .lg .lg-input:focus-visible {
+    background: rgba(20, 24, 34, .92);
+    border-color: #38bdf8;
+    outline: none;
+    color: #fff;
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, .22), 0 0 16px rgba(168, 85, 247, .3);
+}
+
+.lg .lg-input:-webkit-autofill {
+    -webkit-text-fill-color: #f8fafc;
+    -webkit-box-shadow: 0 0 0 1000px #181b22 inset;
+}
+
+.lg .lg-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #cbd5e1;
+    cursor: pointer;
+}
+
+.lg .lg-check input {
+    width: auto;
+    padding: 0;
+    accent-color: #fbbf24;
+}
+
+.lg-note {
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+.lg-msg {
+    font-size: 12px;
+}
+
+.lg-msg.ok {
+    color: #6ee7b7;
+}
+
+.lg-msg.err {
+    color: #fca5a5;
+}
+
+.lg .lg-gold {
+    width: 100%;
+    padding: 10px 16px;
+    border-radius: 14px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #1f1a0e;
+    transition: all .25s;
+    background: linear-gradient(180deg, #fce092 0%, #e2b755 52%, #c9932d 100%);
+    box-shadow: 0 6px 20px -3px rgba(201, 147, 45, .45), inset 0 1px 1px rgba(255, 255, 255, .6);
+}
+
+.lg .lg-gold:hover:not(:disabled) {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+}
+
+.lg .lg-gold:disabled {
+    opacity: .6;
+    cursor: wait;
+}
+
+.lg .lg-gold:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+.lg-foot-note {
+    font-size: 10px;
+    color: #94a3b8;
+    text-align: center;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, .05);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lg *, .lg *::before, .lg *::after {
+        animation: none !important;
+        transition: none !important;
+    }
+}

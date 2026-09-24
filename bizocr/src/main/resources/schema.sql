@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS documents (
                                          file_name            VARCHAR(255)  NOT NULL,
     document_type        VARCHAR(100),                          -- VAT_INVOICE, CONTRACT, ...
     confidence_score     DOUBLE,                                -- 0.0 - 1.0
-    status               VARCHAR(50)   DEFAULT 'PENDING',       -- PENDING, PROCESSING, COMPLETED, NEEDS_REVIEW, FAILED
+    status               VARCHAR(50)   DEFAULT 'PENDING',       -- PENDING, PROCESSING, COMPLETED, NEED_REVIEW, FAILED
     extracted_fields     JSON,
 
     -- Generated columns từ extracted_fields (Phase 1 - virtual columns cho query nhanh không parse JSON)

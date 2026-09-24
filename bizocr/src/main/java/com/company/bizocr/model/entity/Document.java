@@ -65,7 +65,7 @@ public class Document {
      * PENDING       - mới upload, đang chờ Redis
      * PROCESSING    - đang OCR/ML/Ollama
      * COMPLETED     - xử lý tự động thành công
-     * NEEDS_REVIEW  - mẫu lạ hoặc confidence thấp
+     * NEED_REVIEW  - mẫu lạ hoặc confidence thấp
      * APPROVED      - người dùng đã xác nhận
      * REJECTED      - người dùng từ chối
      * FAILED        - lỗi kỹ thuật

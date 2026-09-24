@@ -14,11 +14,11 @@ import java.util.Set;
  *         │     └─► CLASSIFIED
  *         │           └─► EXTRACTED
  *         │                 ├─► VALIDATED ──► APPROVED
- *         │                 └─► NEEDS_REVIEW ──► APPROVED
+ *         │                 └─► NEED_REVIEW ──► APPROVED
  *         │                                 └─► REJECTED_QUALITY
  *         └─► FAILED          (lỗi kỹ thuật bất kỳ bước nào)
- * NEEDS_REVIEW ──► APPROVED   (reviewer duyệt)
- * NEEDS_REVIEW ──► REJECTED_QUALITY (reviewer từ chối)
+ * NEED_REVIEW ──► APPROVED   (reviewer duyệt)
+ * NEED_REVIEW ──► REJECTED_QUALITY (reviewer từ chối)
  * </pre>
  *
  * <b>Quy tắc race-condition:</b>
@@ -51,7 +51,7 @@ public enum DocumentStatus {
      * AI confidence thấp, field thiếu, hoặc validation fail →
      * cần reviewer kiểm tra thủ công trước khi approve/reject.
      */
-    NEEDS_REVIEW,
+    NEED_REVIEW,
 
     // ── Trạng thái cuối (terminal) ────────────────────────────────────────────
     /** Reviewer đã xác nhận và duyệt */
@@ -68,14 +68,14 @@ public enum DocumentStatus {
 
             // Pipeline tự động
             Map.entry(PENDING,           EnumSet.of(PROCESSING, FAILED)),
-            Map.entry(PROCESSING,        EnumSet.of(OCR_DONE, NEEDS_REVIEW, FAILED)),
-            Map.entry(OCR_DONE,          EnumSet.of(CLASSIFIED, NEEDS_REVIEW, FAILED)),
-            Map.entry(CLASSIFIED,        EnumSet.of(EXTRACTED, NEEDS_REVIEW, FAILED)),
-            Map.entry(EXTRACTED,         EnumSet.of(VALIDATED, NEEDS_REVIEW, FAILED)),
-            Map.entry(VALIDATED,         EnumSet.of(APPROVED, NEEDS_REVIEW, FAILED)),
+            Map.entry(PROCESSING,        EnumSet.of(OCR_DONE, NEED_REVIEW, FAILED)),
+            Map.entry(OCR_DONE,          EnumSet.of(CLASSIFIED, NEED_REVIEW, FAILED)),
+            Map.entry(CLASSIFIED,        EnumSet.of(EXTRACTED, NEED_REVIEW, FAILED)),
+            Map.entry(EXTRACTED,         EnumSet.of(VALIDATED, NEED_REVIEW, FAILED)),
+            Map.entry(VALIDATED,         EnumSet.of(APPROVED, NEED_REVIEW, FAILED)),
 
             // Reviewer action
-            Map.entry(NEEDS_REVIEW,      EnumSet.of(APPROVED, REJECTED_QUALITY)),
+            Map.entry(NEED_REVIEW,      EnumSet.of(APPROVED, REJECTED_QUALITY)),
 
             // Terminal — không chuyển tiếp nữa
             Map.entry(APPROVED,          EnumSet.noneOf(DocumentStatus.class)),

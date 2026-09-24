@@ -150,8 +150,8 @@ public class RegexExtractorService {
 
             regexFields = extractContractFields(rawText);
 
-        } else if ("NAME_CARD".equalsIgnoreCase(documentType)
-                || "NAMECARD".equalsIgnoreCase(documentType)
+        } else if ("NAMECARD".equalsIgnoreCase(documentType)
+                || "NAME_CARD".equalsIgnoreCase(documentType)
                 || "DANH_THIEP".equalsIgnoreCase(documentType)) {
 
             regexFields = extractNameCardFields(rawText);

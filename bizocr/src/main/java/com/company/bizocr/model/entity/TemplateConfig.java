@@ -25,7 +25,7 @@ public class TemplateConfig {
     private Long id;
 
     /**
-     * Mã loại chứng từ, VD: invoice_supermarket, invoice_electricity, name_card...[cite: 14]
+     * Mã loại chứng từ, VD: invoice_supermarket, invoice_electricity, NAMECARD...[cite: 14]
      * Dùng trực tiếp làm documentType khi đăng ký vào TemplateMatcher.[cite: 14]
      */
     @Column("doc_type_code")

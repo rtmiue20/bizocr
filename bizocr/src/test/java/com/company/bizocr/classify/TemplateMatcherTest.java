@@ -206,7 +206,7 @@ class TemplateMatcherTest {
     }
 
     @Test
-    @DisplayName("Khớp chính xác Danh thiếp (NAME_CARD) từ văn bản OCR thực tế có đầy đủ chức danh, email, tel, mobile, website, tax code")
+    @DisplayName("Khớp chính xác Danh thiếp (NAMECARD) từ văn bản OCR thực tế có đầy đủ chức danh, email, tel, mobile, website, tax code")
     void testMatchNameCardRealisticOcr() {
         String realisticOcr = """
                 OTCIT
@@ -225,17 +225,17 @@ class TemplateMatcherTest {
 
         Optional<ClassifyResult> resultOpt = templateMatcher.match(realisticOcr);
 
-        assertTrue(resultOpt.isPresent(), "Phải khớp được NAME_CARD từ OCR thực tế");
+        assertTrue(resultOpt.isPresent(), "Phải khớp được NAMECARD từ OCR thực tế");
         ClassifyResult result = resultOpt.get();
-        assertEquals("NAME_CARD", result.getDocumentType());
+        assertEquals("NAMECARD", result.getDocumentType());
         assertTrue(result.getConfidenceScore() >= 0.70);
     }
 
     @Test
-    @DisplayName("Khớp chính xác Danh thiếp (NAME_CARD) khi số điện thoại/domain KHÔNG có nhãn - kịch bản OCR thực tế")
+    @DisplayName("Khớp chính xác Danh thiếp (NAMECARD) khi số điện thoại/domain KHÔNG có nhãn - kịch bản OCR thực tế")
     void testMatchNameCardWithoutLabels() {
         // Namecard thật: không có nhãn "phone:"/"tel:"/"website:" đi kèm, chỉ in trần số và domain.
-        // Đây chính là kịch bản trước đây khiến NAME_CARD chỉ đạt 0.60 điểm (dưới ngưỡng 0.70)
+        // Đây chính là kịch bản trước đây khiến NAMECARD chỉ đạt 0.60 điểm (dưới ngưỡng 0.70)
         // vì thiếu regex bắt số điện thoại/domain không nhãn.
         String rawText = """
                 NGUYỄN VĂN A
@@ -247,9 +247,9 @@ class TemplateMatcherTest {
 
         Optional<ClassifyResult> resultOpt = templateMatcher.match(rawText);
 
-        assertTrue(resultOpt.isPresent(), "Phải khớp được NAME_CARD dù không có nhãn phone/website");
+        assertTrue(resultOpt.isPresent(), "Phải khớp được NAMECARD dù không có nhãn phone/website");
         ClassifyResult result = resultOpt.get();
-        assertEquals("NAME_CARD", result.getDocumentType());
+        assertEquals("NAMECARD", result.getDocumentType());
         assertTrue(result.getConfidenceScore() >= 0.70);
     }
 

@@ -10,3 +10,6 @@
 /dataSources.local.xml
 # Ignore Secret Configs
 src/main/resources/application-secret.yml
+
+application-secret.yml
+**/application-secret.yml

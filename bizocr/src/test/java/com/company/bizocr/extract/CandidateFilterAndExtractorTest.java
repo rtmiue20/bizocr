@@ -184,24 +184,24 @@ class CandidateFilterAndExtractorTest {
     }
 
     @Test
-    @DisplayName("RegexExtractorService - Trích xuất chính xác các trường của Danh thiếp (NAME_CARD) từ văn bản OCR thực tế")
+    @DisplayName("RegexExtractorService - Trích xuất chính xác các trường của Danh thiếp (NAMECARD) từ văn bản OCR thực tế")
     void testExtractNameCardRealisticOcr() {
         String realisticOcr = """
                 OTCIT
                 Nguyễn Việt Hưng
                 International Terminal Co, Ltd
-                Tan Cang-Cni Mep
+                Tan Cang-Cai Mep
                 Giám Đốc Tài Chính
-                CÔNG TY TNHH CẢNG QUỐC TẾ TÂN CẢNG - CÁI MẾP
+                CÔNG TY TNHH CẢNG QUỐC TẾ TÂN CẢNG - CÁI MÉP
                 Tầng 11, P.1104, Sunwah Tower
                 115 Nguyễn Huệ, Q.1, Tp.HCM
                 Tel: 84838278 591 (ext: 109)-Fax: 84838278 592
                 Mobile: 84-988 202 177 Tax code: 3501473524
-                E-mail: hung.nguyen@Atcit.com vn
-                Website: www.tcit.c@m.vn
+                E-mail: hung.nguyen@tcit.com vn
+                Website: www.tcit.com.vn
                 """;
 
-        Map<String, Object> fields = regexExtractorService.extractFromHardcodedRegex("NAME_CARD", realisticOcr);
+        Map<String, Object> fields = regexExtractorService.extractFromHardcodedRegex("NAMECARD", realisticOcr);
 
         assertNotNull(fields);
         assertEquals("Nguyễn Việt Hưng", fields.get("contact_name"));

@@ -1,9 +1,11 @@
 package com.company.bizocr.service;
 
+import com.company.bizocr.extract.DocumentFieldSchema;
 import com.company.bizocr.model.dto.OllamaTaskPayload;
 import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.repository.DocumentRepository;
 import com.company.bizocr.validator.ExtractionValidatorService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -81,7 +83,7 @@ public class OllamaQueueService implements SmartLifecycle {
         stopWorker();
     }
 
-@Override
+    @Override
     public void stop(Runnable callback) {
         stop();
         callback.run();
@@ -101,7 +103,7 @@ public class OllamaQueueService implements SmartLifecycle {
      * Phase cao (ví dụ: Integer.MAX_VALUE - 1000) đảm bảo:
      * - Khi STARTUP: LettuceConnectionFactory (Phase 0) khởi động trước, OllamaQueueService khởi động sau.
      * - Khi SHUTDOWN: Spring dừng SmartLifecycle theo thứ tự Phase giảm dần -> OllamaQueueService (Phase cao) dừng trước,
-     *   LettuceConnectionFactory (Phase 0) dừng sau, triệt tiêu 100% race condition "LettuceConnectionFactory has been STOPPED".
+     * LettuceConnectionFactory (Phase 0) dừng sau, triệt tiêu 100% race condition "LettuceConnectionFactory has been STOPPED".
      */
     @Override
     public int getPhase() {
@@ -126,7 +128,8 @@ public class OllamaQueueService implements SmartLifecycle {
                     });
                 }, 2)
                 .subscribe(
-                        success -> {},
+                        success -> {
+                        },
                         error -> log.error(">> [Ollama Worker] Worker đã chết vĩnh viễn vì lỗi:", error)
                 );
         log.info(">> [Ollama Worker] Đã khởi động worker với Max Concurrency = 2 (Phase: {}).", getPhase());
@@ -163,7 +166,11 @@ public class OllamaQueueService implements SmartLifecycle {
                         log.info(">> [Ollama Worker] Bắt đầu xử lý AI cho DocID: {}", task.getDocumentId());
 
                         String rawJsonResult = callOllamaSync(task.getDocumentType(), task.getRawText());
-                        String finalValidatedJson = extractionValidatorService.validateAndSanitize(task.getDocumentType(), rawJsonResult);
+                        String validatedJson = extractionValidatorService.validateAndSanitize(task.getDocumentType(), rawJsonResult);
+
+                        // Cố định bộ key theo loại chứng từ (NAMECARD -> contact_name, company_name, tax_code, ...).
+                        // Loại chưa khai báo schema thì giữ nguyên.
+                        String finalValidatedJson = DocumentFieldSchema.normalize(task.getDocumentType(), validatedJson, objectMapper);
 
                         log.info(">> [Ollama Worker] Hoàn tất bóc tách AI cho DocID: {}. Result: {}", task.getDocumentId(), finalValidatedJson);
 
@@ -175,12 +182,15 @@ public class OllamaQueueService implements SmartLifecycle {
                                     doc.setExtractedFields(finalValidatedJson);
 
                                     try {
-                                        var rootNode = objectMapper.readTree(finalValidatedJson);
-                                        if (rootNode.has("name") && !rootNode.get("name").isNull()) {
-                                            doc.setContactName(rootNode.get("name").asText());
+                                        JsonNode rootNode = objectMapper.readTree(finalValidatedJson);
+                                        // Ưu tiên key chuẩn (contact_name/contact_title), fallback key cũ (name/title)
+                                        String contactName = firstText(rootNode, "contact_name", "name");
+                                        String contactTitle = firstText(rootNode, "contact_title", "title");
+                                        if (contactName != null) {
+                                            doc.setContactName(contactName);
                                         }
-                                        if (rootNode.has("title") && !rootNode.get("title").isNull()) {
-                                            doc.setContactTitle(rootNode.get("title").asText());
+                                        if (contactTitle != null) {
+                                            doc.setContactTitle(contactTitle);
                                         }
                                     } catch (Exception ex) {
                                         log.warn(">> [Ollama Worker] Lỗi parse JSON map field cho DocID: {}", docId);
@@ -202,6 +212,21 @@ public class OllamaQueueService implements SmartLifecycle {
                     log.error(">> [Ollama Worker] Lỗi khi xử lý 1 task cụ thể, nuốt lỗi để worker tiếp tục chạy:", error);
                     return Mono.empty();
                 });
+    }
+
+    /**
+     * Lấy giá trị chữ không rỗng đầu tiên trong các key được liệt kê; không có thì trả null.
+     */
+    private String firstText(JsonNode node, String... keys) {
+        if (node == null) return null;
+        for (String key : keys) {
+            JsonNode v = node.get(key);
+            if (v != null && !v.isNull()) {
+                String s = v.asText().trim();
+                if (!s.isEmpty()) return s;
+            }
+        }
+        return null;
     }
 
     private String callOllamaSync(String documentType, String rawText) {
@@ -252,57 +277,31 @@ public class OllamaQueueService implements SmartLifecycle {
     }
 
     /**
-     * Trả về khung JSON mẫu phù hợp theo loại chứng từ.
-     * Nếu là loại chứng từ lạ/chưa định nghĩa, dùng Khung Mẫu Tổng Quát.
+     * Trả về khung JSON mẫu theo loại chứng từ.
+     * Khung được SINH từ DocumentFieldSchema nên key luôn đúng bộ key chuẩn (và luôn là JSON hợp lệ).
+     * Chỉ loại tùy biến chưa có schema mới dùng Khung Mẫu Tổng Quát bên dưới.
      */
     private String getJsonTemplateForDocument(String documentType) {
-        if (documentType == null) {
-            documentType = "";
+        String template = DocumentFieldSchema.jsonTemplate(documentType);
+        if (template != null) {
+            return template;
         }
 
-        return switch (documentType.toUpperCase()) {
-            case "NAME_CARD", "DANH_THIEP" -> """
-        {
-          "name": "Họ và tên",
-          "title": "Chức danh / Chức vụ (ví dụ: Director, Manager...)",
-          "company": "Tên công ty / Tổ chức",
-          "phone": "Số điện thoại",
-          "email": "Địa chỉ Email",
-          "address": "Địa chỉ cơ quan / Văn phòng",
-          "website": "Trang web"
-        }
-        """;
-
-            case "INVOICE", "HOA_DON", "RECEIPT" -> """
-        {
-          "invoiceNumber": "Số hóa đơn / Số chứng từ",
-          "issueDate": "Ngày phát hành / Ngày lập",
-          "sellerName": "Đơn vị bán / Phía cung cấp",
-          "sellerTaxCode": "Mã số thuế bên bán",
-          "buyerName": "Đơn vị mua / Khách hàng",
-          "buyerTaxCode": "Mã số thuế bên mua",
-          "totalAmount": "Tổng tiền thanh toán",
-          "address": "Địa chỉ trên hóa đơn"
-        }
-        """;
-
-            // KHUNG MẪU TỔNG QUÁT: Cho mọi loại chứng từ / giấy tờ khác
-            default -> """
-        {
-          "documentTitle": "Tên loại chứng từ / Tiêu đề giấy tờ",
-          "documentNumber": "Số hiệu / Mã số chứng từ",
-          "issueDate": "Ngày tháng năm",
-          "issuerName": "Tên đơn vị / Cá nhân phát hành",
-          "taxCode": "Mã số thuế (nếu có)",
-          "personInCharge": "Họ tên người liên quan / Đại diện / Chức vụ",
-          "title": "Chức danh / Vị trí công tác (nếu có)",
-          "phoneNumber": "Số điện thoại liên hệ",
-          "email": "Email liên hệ",
-          "address": "Địa chỉ ghi trên chứng từ",
-          "totalAmount": "Số tiền / Giá trị (nếu có)",
-          "note": "Ghi chú / Nội dung chính"
-        }
-        """;
-        };
+        return """
+                {
+                  "documentTitle": "Tên loại chứng từ / Tiêu đề giấy tờ",
+                  "documentNumber": "Số hiệu / Mã số chứng từ",
+                  "issueDate": "Ngày tháng năm",
+                  "issuerName": "Tên đơn vị / Cá nhân phát hành",
+                  "taxCode": "Mã số thuế (nếu có)",
+                  "personInCharge": "Họ tên người liên quan / Đại diện / Chức vụ",
+                  "title": "Chức danh / Vị trí công tác (nếu có)",
+                  "phoneNumber": "Số điện thoại liên hệ",
+                  "email": "Email liên hệ",
+                  "address": "Địa chỉ ghi trên chứng từ",
+                  "totalAmount": "Số tiền / Giá trị (nếu có)",
+                  "note": "Ghi chú / Nội dung chính"
+                }
+                """;
     }
 }

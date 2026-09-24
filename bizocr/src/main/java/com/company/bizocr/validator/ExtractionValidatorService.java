@@ -22,8 +22,8 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * ExtractionValidatorService hỗ trợ 2 chế độ:
  * - SHADOW MODE (mặc định true): Chạy toàn bộ các rule (Schema, MST Check-digit, Date, Amount, Grounding),
- *   ghi log cảnh báo và lưu telemetry/thống kê tỷ lệ vi phạm mà KHÔNG chặn hay cưỡng chế chuyển sang NEEDS_REVIEW.
- * - ACTIVE/BLOCKING MODE: Bật chặn thật sự, nếu vi phạm sẽ đánh dấu NEEDS_REVIEW ngay lập tức.
+ *   ghi log cảnh báo và lưu telemetry/thống kê tỷ lệ vi phạm mà KHÔNG chặn hay cưỡng chế chuyển sang NEED_REVIEW.
+ * - ACTIVE/BLOCKING MODE: Bật chặn thật sự, nếu vi phạm sẽ đánh dấu NEED_REVIEW ngay lập tức.
  */
 @Slf4j
 @Service

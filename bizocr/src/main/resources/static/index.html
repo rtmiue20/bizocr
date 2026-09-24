@@ -62,7 +62,7 @@
         .badge.CLASSIFIED { background:rgba(198,120,221,.18); color:var(--purple); }
         .badge.EXTRACTED { background:rgba(124,156,232,.18); color:var(--review); }
         .badge.VALIDATED { background:rgba(76,175,130,.18); color:var(--ok); }
-        .badge.NEEDS_REVIEW, .badge.NEED_REVIEW { background:rgba(224,161,60,.25); color:var(--warn); border:1px solid rgba(224,161,60,.4); }
+        .badge.NEED_REVIEW, .badge.NEED_REVIEW { background:rgba(224,161,60,.25); color:var(--warn); border:1px solid rgba(224,161,60,.4); }
         .badge.APPROVED, .badge.COMPLETED { background:rgba(76,175,130,.2); color:var(--ok); border:1px solid rgba(76,175,130,.4); }
         .badge.REJECTED_QUALITY, .badge.REJECTED, .badge.FAILED, .badge.WARNING_ANOMALY { background:rgba(217,97,79,.2); color:var(--err); border:1px solid rgba(217,97,79,.4); }
 
@@ -408,7 +408,7 @@
                             <option value="CLASSIFIED">CLASSIFIED (Đã phân loại)</option>
                             <option value="EXTRACTED">EXTRACTED (Đã bóc tách)</option>
                             <option value="VALIDATED">VALIDATED (Đã kiểm tra hợp lệ)</option>
-                            <option value="NEEDS_REVIEW">NEEDS_REVIEW (Cần kiểm tra thủ công)</option>
+                            <option value="NEED_REVIEW">NEED_REVIEW (Cần kiểm tra thủ công)</option>
                             <option value="APPROVED">APPROVED (Đã duyệt)</option>
                             <option value="REJECTED_QUALITY">REJECTED_QUALITY (Từ chối chất lượng)</option>
                             <option value="FAILED">FAILED (Lỗi kỹ thuật)</option>
@@ -534,7 +534,7 @@
                             <option value="CLASSIFIED">CLASSIFIED (Đã phân loại)</option>
                             <option value="EXTRACTED">EXTRACTED (Đã trích xuất)</option>
                             <option value="VALIDATED">VALIDATED (Đã hợp lệ)</option>
-                            <option value="NEEDS_REVIEW">NEEDS_REVIEW (Cần kiểm tra)</option>
+                            <option value="NEED_REVIEW">NEED_REVIEW (Cần kiểm tra)</option>
                             <option value="APPROVED">APPROVED (Đã duyệt)</option>
                             <option value="REJECTED_QUALITY">REJECTED_QUALITY (Từ chối chất lượng)</option>
                             <option value="FAILED">FAILED (Lỗi)</option>
@@ -1029,7 +1029,7 @@
 
             $('trackHint').textContent = d.status === 'PROCESSING'
                 ? 'Hệ thống đang tiến hành OCR và trích xuất dữ liệu ngầm...'
-                : (d.status === 'NEEDS_REVIEW' ? '⚠ Tài liệu cần được kiểm tra thủ công trước khi duyệt (Confidence thấp hoặc vi phạm quy tắc validation).' : '');
+                : (d.status === 'NEED_REVIEW' ? '⚠ Tài liệu cần được kiểm tra thủ công trước khi duyệt (Confidence thấp hoặc vi phạm quy tắc validation).' : '');
         }
 
         function renderValidationReport(doc) {
@@ -1161,7 +1161,7 @@
 
             const validStatuses = [
                 'PENDING', 'PROCESSING', 'OCR_DONE', 'CLASSIFIED',
-                'EXTRACTED', 'VALIDATED', 'NEEDS_REVIEW',
+                'EXTRACTED', 'VALIDATED', 'NEED_REVIEW',
                 'APPROVED', 'REJECTED_QUALITY', 'FAILED'
             ];
             if (validStatuses.includes(doc.status)) {

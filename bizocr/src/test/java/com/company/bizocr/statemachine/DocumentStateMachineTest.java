@@ -185,22 +185,22 @@ class DocumentStateMachineTest {
                 "PENDING,          PROCESSING",
                 "PENDING,          FAILED",
                 "PROCESSING,       OCR_DONE",
-                "PROCESSING,       NEEDS_REVIEW",
+                "PROCESSING,       NEED_REVIEW",
                 "PROCESSING,       FAILED",
                 "OCR_DONE,         CLASSIFIED",
-                "OCR_DONE,         NEEDS_REVIEW",
+                "OCR_DONE,         NEED_REVIEW",
                 "OCR_DONE,         FAILED",
                 "CLASSIFIED,       EXTRACTED",
-                "CLASSIFIED,       NEEDS_REVIEW",
+                "CLASSIFIED,       NEED_REVIEW",
                 "CLASSIFIED,       FAILED",
                 "EXTRACTED,        VALIDATED",
-                "EXTRACTED,        NEEDS_REVIEW",
+                "EXTRACTED,        NEED_REVIEW",
                 "EXTRACTED,        FAILED",
                 "VALIDATED,        APPROVED",
-                "VALIDATED,        NEEDS_REVIEW",
+                "VALIDATED,        NEED_REVIEW",
                 "VALIDATED,        FAILED",
-                "NEEDS_REVIEW,     APPROVED",
-                "NEEDS_REVIEW,     REJECTED_QUALITY",
+                "NEED_REVIEW,     APPROVED",
+                "NEED_REVIEW,     REJECTED_QUALITY",
         })
         void allowed(String from, String to) {
             assertThat(DocumentStatus.isAllowed(
@@ -212,7 +212,7 @@ class DocumentStateMachineTest {
         @ParameterizedTest(name = "{0} → {1} phải BỊ CHẶN")
         @CsvSource({
                 "APPROVED,         PROCESSING",
-                "APPROVED,         NEEDS_REVIEW",
+                "APPROVED,         NEED_REVIEW",
                 "REJECTED_QUALITY, APPROVED",
                 "FAILED,           PROCESSING",
                 "FAILED,           PENDING",
@@ -240,7 +240,7 @@ class DocumentStateMachineTest {
         assertThat(DocumentStatus.fromString("  ")).isNull();
         assertThat(DocumentStatus.fromString("unknown_xyz")).isNull();
         assertThat(DocumentStatus.fromString("pending")).isEqualTo(DocumentStatus.PENDING);
-        assertThat(DocumentStatus.fromString("NEEDS_REVIEW")).isEqualTo(DocumentStatus.NEEDS_REVIEW);
+        assertThat(DocumentStatus.fromString("NEED_REVIEW")).isEqualTo(DocumentStatus.NEED_REVIEW);
         assertThat(DocumentStatus.fromString(" approved ")).isEqualTo(DocumentStatus.APPROVED);
     }
 }

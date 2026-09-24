@@ -77,7 +77,7 @@ public class FieldExtractorService {
      *
      * 1. Dynamic config nếu có.
      * 2. Regex hardcoded nếu không có dynamic config.
-     * 3. NAME_CARD dùng gate riêng.
+     * 3. NAMECARD dùng gate riêng.
      * 4. Chỉ đẩy Ollama queue khi regex thực sự không đủ dữ liệu.
      */
     public Mono<String> extractFields(
@@ -106,9 +106,9 @@ public class FieldExtractorService {
             boolean isNameCard = isNameCard(documentType);
 
             /*
-             * NAME_CARD có schema riêng và không có total_amount.
+             * NAMECARD có schema riêng và không có total_amount.
              *
-             * Luôn dùng hardcoded regex cho NAME_CARD để:
+             * Luôn dùng hardcoded regex cho NAMECARD để:
              * - Bắt đúng contact_name.
              * - Bắt đúng contact_title.
              * - Không phụ thuộc cấu hình DB thiếu hoặc sai.
@@ -169,7 +169,7 @@ public class FieldExtractorService {
                         (double) matchedNameCardSignals / 4.0;
 
                 /*
-                 * NAME_CARD đạt khi có:
+                 * NAMECARD đạt khi có:
                  * - Tên người.
                  * - Chức danh.
                  * - Một phương thức liên hệ.
@@ -382,8 +382,8 @@ public class FieldExtractorService {
     }
 
     private boolean isNameCard(String documentType) {
-        return "NAME_CARD".equalsIgnoreCase(documentType)
-                || "NAMECARD".equalsIgnoreCase(documentType)
+        return "NAMECARD".equalsIgnoreCase(documentType)
+                || "NAME_CARD".equalsIgnoreCase(documentType)
                 || "DANH_THIEP".equalsIgnoreCase(documentType);
     }
 
