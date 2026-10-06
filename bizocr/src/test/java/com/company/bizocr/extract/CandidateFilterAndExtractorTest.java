@@ -206,7 +206,7 @@ class CandidateFilterAndExtractorTest {
         assertNotNull(fields);
         assertEquals("Nguyễn Việt Hưng", fields.get("contact_name"));
         assertEquals("Giám Đốc Tài Chính", fields.get("contact_title"));
-        assertEquals("CÔNG TY TNHH CẢNG QUỐC TẾ TÂN CẢNG - CÁI MẾP", fields.get("company_name"));
+        assertEquals("CÔNG TY TNHH CẢNG QUỐC TẾ TÂN CẢNG - CÁI MÉP", fields.get("company_name"));
         assertEquals("hung.nguyen@tcit.com.vn", fields.get("email"), "Email phải được sanitize sửa lỗi @Atcit và khoảng trắng");
         assertEquals("www.tcit.com.vn", fields.get("website"), "Website phải được sanitize sửa lỗi c@m");
         assertTrue(fields.containsKey("phone"));

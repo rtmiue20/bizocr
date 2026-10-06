@@ -7,6 +7,7 @@ import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.model.entity.DocumentStatus;
 import com.company.bizocr.ocr.OcrClientService;
 import com.company.bizocr.repository.DocumentRepository;
+import com.company.bizocr.service.OllamaQueueService;
 import com.company.bizocr.statemachine.DocumentStateMachine;
 import com.company.bizocr.statemachine.DocumentStateMachine.TransitionResult;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -59,6 +60,7 @@ public class PipelineOrchestrator {
     private final CompanyResolverService companyResolverService;
     private final ObjectMapper objectMapper;
     private final DocumentStateMachine stateMachine;
+    private final OllamaQueueService ollamaQueueService;
 
     // =========================================================================
     // Public entry points
@@ -122,10 +124,20 @@ public class PipelineOrchestrator {
                                             boolean usedAiFallback = MatchStrategy.isAiFallback(
                                                     classifyResult.getMatchedBy());
                                             record.setUsedAiFallback(usedAiFallback);
-                                            record.setMatchedBy(usedAiFallback
+                                            String matchedBy = usedAiFallback
                                                     ? MatchStrategy.OLLAMA_LOCAL.name()
-                                                    : classifyResult.getMatchedBy());
-                                            record.setModelVersion("template-v1");
+                                                    : classifyResult.getMatchedBy();
+                                            record.setMatchedBy(matchedBy);
+
+                                            String realModelVersion;
+                                            if (usedAiFallback) {
+                                                realModelVersion = "ollama-local";
+                                            } else if ("ML_SYSTEM".equalsIgnoreCase(matchedBy)) {
+                                                realModelVersion = "python-ml-v1";
+                                            } else {
+                                                realModelVersion = "rule-template-v1";
+                                            }
+                                            record.setModelVersion(realModelVersion);
 
                                             return stateMachine.transition(record.getId(),
                                                             DocumentStatus.OCR_DONE, DocumentStatus.CLASSIFIED)
@@ -133,84 +145,96 @@ public class PipelineOrchestrator {
 
                                                     // ── Step 5: CLASSIFIED → EXTRACTED ──────
                                                     .then(Mono.defer(() -> {
-                                                        String docId = record.getId() != null
-                                                                ? String.valueOf(record.getId()) : null;
-                                                        Mono<String> extractMono = docId != null
-                                                                ? fieldExtractorService.extractFields(
-                                                                docId, classifyResult, rawText)
-                                                                : fieldExtractorService.extractFields(
-                                                                classifyResult, rawText);
-                                                        return extractMono;
-                                                    })
-                                                    .flatMap(extractedFields -> {
-                                                        record.setExtractedFields(extractedFields);
+                                                                String docId = record.getId() != null
+                                                                        ? String.valueOf(record.getId()) : null;
+                                                                Mono<String> extractMono = docId != null
+                                                                        ? fieldExtractorService.extractFields(
+                                                                        docId, classifyResult, rawText)
+                                                                        : fieldExtractorService.extractFields(
+                                                                        classifyResult, rawText);
+                                                                return extractMono;
+                                                            })
+                                                            .flatMap(extractedFields -> {
+                                                                record.setExtractedFields(extractedFields);
 
-                                                        return stateMachine.transition(record.getId(),
-                                                                        DocumentStatus.CLASSIFIED,
-                                                                        DocumentStatus.EXTRACTED)
-                                                                .flatMap(r -> handleMismatch(r, record, DocumentStatus.EXTRACTED))
+                                                                return stateMachine.transition(record.getId(),
+                                                                                DocumentStatus.CLASSIFIED,
+                                                                                DocumentStatus.EXTRACTED)
+                                                                        .flatMap(r -> handleMismatch(r, record, DocumentStatus.EXTRACTED))
 
-                                                                // ── Step 6: Quyết định VALIDATED vs NEED_REVIEW
-                                                                .then(Mono.defer(() -> {
-                                                                    boolean lowConfidence =
-                                                                            classifyResult.getConfidenceScore() == null
-                                                                                    || classifyResult.getConfidenceScore() < 0.90;
-                                                                    boolean fieldsIncomplete =
-                                                                            extractedFields == null
-                                                                                    || extractedFields.isBlank()
-                                                                                    || "{}".equals(extractedFields);
+                                                                        // ── Step 6: Quyết định VALIDATED vs NEED_REVIEW
+                                                                        .then(Mono.defer(() -> {
+                                                                            boolean lowConfidence =
+                                                                                    classifyResult.getConfidenceScore() == null
+                                                                                            || classifyResult.getConfidenceScore() < 0.90;
+                                                                            boolean fieldsIncomplete =
+                                                                                    extractedFields == null
+                                                                                            || extractedFields.isBlank()
+                                                                                            || "{}".equals(extractedFields);
 
-                                                                    boolean hasValidationReviewRequirement = false;
-                                                                    if (extractedFields != null && !extractedFields.isBlank()) {
-                                                                        try {
-                                                                            JsonNode jsonTree = objectMapper.readTree(extractedFields);
-                                                                            if (jsonTree.has("review_status") &&
-                                                                                    "PENDING_REVIEW".equalsIgnoreCase(jsonTree.get("review_status").asText())) {
-                                                                                hasValidationReviewRequirement = true;
+                                                                            boolean hasValidationReviewRequirement = false;
+                                                                            if (extractedFields != null && !extractedFields.isBlank()) {
+                                                                                try {
+                                                                                    JsonNode jsonTree = objectMapper.readTree(extractedFields);
+                                                                                    if (jsonTree.has("review_status") &&
+                                                                                            "PENDING_AI_WORKER".equalsIgnoreCase(jsonTree.get("review_status").asText())) {
+                                                                                        hasValidationReviewRequirement = true;
+                                                                                    }
+                                                                                } catch (Exception ignored) {
+                                                                                }
                                                                             }
-                                                                        } catch (Exception ignored) {
-                                                                        }
-                                                                    }
 
-                                                                    if (usedAiFallback || lowConfidence
-                                                                            || fieldsIncomplete
-                                                                            || !companyInfo.isFound()
-                                                                            || hasValidationReviewRequirement) {
-                                                                        // → NEED_REVIEW
-                                                                        return stateMachine.transition(
-                                                                                record.getId(),
-                                                                                DocumentStatus.EXTRACTED,
-                                                                                DocumentStatus.NEED_REVIEW)
-                                                                                .flatMap(r -> handleMismatch(r, record, DocumentStatus.NEED_REVIEW))
-                                                                                .then(Mono.defer(() -> {
-                                                                                    record.setStatus(DocumentStatus.NEED_REVIEW.name());
-                                                                                    return persistRecord(record);
-                                                                                }));
-                                                                    } else {
-                                                                        // → VALIDATED → (APPROVED chờ reviewer)
-                                                                        return stateMachine.transition(
-                                                                                record.getId(),
-                                                                                DocumentStatus.EXTRACTED,
-                                                                                DocumentStatus.VALIDATED)
-                                                                                .flatMap(r -> handleMismatch(r,
-                                                                                        record,
-                                                                                        DocumentStatus.VALIDATED))
-                                                                                .then(Mono.defer(() -> {
-                                                                                    record.setStatus(DocumentStatus.VALIDATED.name());
-                                                                                    return persistRecord(record);
-                                                                                }));
-                                                                    }
-                                                                }));
-                                                    }));
+                                                                            if (usedAiFallback || lowConfidence
+                                                                                    || fieldsIncomplete
+                                                                                    || !companyInfo.isFound()
+                                                                                    || hasValidationReviewRequirement) {
+                                                                                // → NEED_REVIEW
+                                                                                boolean finalHasValidationReviewRequirement = hasValidationReviewRequirement;
+                                                                                return stateMachine.transition(
+                                                                                                record.getId(),
+                                                                                                DocumentStatus.EXTRACTED,
+                                                                                                DocumentStatus.NEED_REVIEW)
+                                                                                        .flatMap(r -> handleMismatch(r, record, DocumentStatus.NEED_REVIEW))
+                                                                                        .then(Mono.defer(() -> {
+                                                                                            record.setStatus(DocumentStatus.NEED_REVIEW.name());
+                                                                                            return persistRecord(record)
+                                                                                                    .doOnSuccess(savedDoc -> {
+                                                                                                        // Chỉ push queue SAU KHI đã lưu DB thành công
+                                                                                                        if (finalHasValidationReviewRequirement && savedDoc.getId() != null) {
+                                                                                                            log.info("[Pipeline] Đẩy task AI cho documentId={} vào queue", savedDoc.getId());
+                                                                                                            ollamaQueueService.enqueueTask(
+                                                                                                                    String.valueOf(savedDoc.getId()),
+                                                                                                                    savedDoc.getDocumentType(),
+                                                                                                                    savedDoc.getRawOcrText()
+                                                                                                            );
+                                                                                                        }
+                                                                                                    });
+                                                                                        }));
+                                                                            } else {
+                                                                                // → VALIDATED → (APPROVED chờ reviewer)
+                                                                                return stateMachine.transition(
+                                                                                                record.getId(),
+                                                                                                DocumentStatus.EXTRACTED,
+                                                                                                DocumentStatus.VALIDATED)
+                                                                                        .flatMap(r -> handleMismatch(r,
+                                                                                                record,
+                                                                                                DocumentStatus.VALIDATED))
+                                                                                        .then(Mono.defer(() -> {
+                                                                                            record.setStatus(DocumentStatus.VALIDATED.name());
+                                                                                            return persistRecord(record);
+                                                                                        }));
+                                                                            }
+                                                                        }));
+                                                            }));
                                         });
                             });
                 })
                 .onErrorResume(error -> {
                     log.error("[Pipeline] Lỗi kỹ thuật cho documentId={}", record.getId(), error);
-                    return stateMachine.forceMarkFailed(record.getId(), record.getStatus())
+                    return documentRepository.updateStatusForced(record.getId(), DocumentStatus.FAILED.name())
                             .doOnNext(rows -> {
                                 if (rows == 0) {
-                                    log.warn("[Pipeline] forceMarkFailed không update được row nào " +
+                                    log.warn("[Pipeline] updateStatusForced không update được row nào " +
                                             "cho documentId={} (có thể đã FAILED rồi)", record.getId());
                                 }
                             })
@@ -245,19 +269,34 @@ public class PipelineOrchestrator {
         };
     }
 
-    /** Lưu snapshot field xuống DB (không đổi status) */
+    /** Lưu snapshot field xuống DB có điều kiện (chỉ khi reviewed_by IS NULL) */
     private Mono<Document> persistRecord(Document record) {
         log.info("[Pipeline] documentId={} type={} matchedBy={} confidence={} status={}",
                 record.getId(), record.getDocumentType(), record.getMatchedBy(),
                 record.getConfidenceScore(), record.getStatus());
-        return documentRepository.save(record);
+
+        return documentRepository.updatePipelineResultsIfNotReviewed(
+                record.getId(),
+                record.getDocumentType(),
+                record.getConfidenceScore(),
+                record.getMatchedBy(),
+                record.getUsedAiFallback(),
+                record.getModelVersion(),
+                record.getRawOcrText(),
+                record.getOcrEngine(),
+                record.getCompanyId(),
+                record.getExtractedFields()
+        ).doOnNext(rows -> {
+            if (rows == 0) {
+                log.warn("[Pipeline] documentId={} không thể persist: reviewed_by IS NOT NULL hoặc status không khớp (bảo vệ can thiệp của người dùng)", record.getId());
+            }
+        }).thenReturn(record);
     }
 
     /** Ép FAILED và propagate lỗi ra ngoài (dùng trong onErrorResume đơn giản) */
     private Mono<Document> forceFailAndError(Document record, String reason) {
         log.error("[Pipeline] documentId={} → FAILED: {}", record.getId(), reason);
-        record.setStatus(DocumentStatus.FAILED.name());
-        return documentRepository.save(record)
+        return documentRepository.updateStatusForced(record.getId(), DocumentStatus.FAILED.name())
                 .then(Mono.error(new IllegalStateException(reason)));
     }
 }

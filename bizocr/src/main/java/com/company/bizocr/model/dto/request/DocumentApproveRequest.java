@@ -19,4 +19,9 @@ public class DocumentApproveRequest {
     private Map<String, Object> updatedFields; // JSON fields đã được human correction
     private String contactName;
     private String contactTitle;
+    /**
+     * Kế toán chủ động đánh dấu "tôi tin đây là dữ liệu đúng".
+     * Khi true + trustedLabeler = true thì document đủ điều kiện vào lô huấn luyện.
+     */
+    private Boolean humanVerified;
 }

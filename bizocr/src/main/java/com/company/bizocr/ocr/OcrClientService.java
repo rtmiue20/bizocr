@@ -3,6 +3,7 @@ package com.company.bizocr.ocr;
 import com.company.bizocr.model.dto.OcrResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
@@ -23,9 +24,14 @@ public class OcrClientService {
 
     private final WebClient ocrWebClient;
 
-    // Sử dụng @Qualifier để chọn đích danh Bean ocrWebClient (trỏ đến Python Service)
-    public OcrClientService(@Qualifier("ocrWebClient") WebClient ocrWebClient) {
-        this.ocrWebClient = ocrWebClient;
+    // Sử dụng @Qualifier để chọn đích danh Bean ocrWebClient và bổ sung defaultHeader X-Internal-Token
+    public OcrClientService(
+            @Qualifier("ocrWebClient") WebClient ocrWebClient,
+            @Value("${bizocr.security.internal-token:${INTERNAL_TOKEN:dev-internal-token}}") String internalToken) {
+
+        this.ocrWebClient = ocrWebClient.mutate()
+                .defaultHeader("X-Internal-Token", internalToken)
+                .build();
     }
 
     public Mono<OcrResult> extractText(FilePart filePart) {

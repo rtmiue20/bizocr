@@ -25,7 +25,14 @@ public class CurrentUserResolver {
                     Object rawCompanyId = jwt.getClaim("companyId");
                     Long companyId = parseClaimAsLong(rawCompanyId);
 
-                    return new CurrentUser(jwt.getSubject(), roles, companyId);
+                    Object rawUserId = jwt.getClaim("userId");
+                    Long userId = parseClaimAsLong(rawUserId);
+
+                    // Đọc trusted_labeler claim (Boolean); mặc định false nếu không có
+                    Object rawTrusted = jwt.getClaim("trusted_labeler");
+                    boolean trustedLabeler = rawTrusted instanceof Boolean b && b;
+
+                    return new CurrentUser(userId, jwt.getSubject(), roles, companyId, trustedLabeler);
                 });
     }
 

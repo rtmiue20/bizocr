@@ -14,7 +14,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 @Service
-public class StorageService {
+public class StorageService implements FileStorage {
 
     private final Path rootLocation = Paths.get("uploads").toAbsolutePath().normalize();
 
@@ -68,5 +68,15 @@ public class StorageService {
                 throw new RuntimeException("Lỗi tải file: " + relativePath, e);
             }
         });
+    }
+
+    @Override
+    public Mono<String> save(FilePart filePart) {
+        return saveFile(filePart);
+    }
+
+    @Override
+    public Mono<Resource> load(String storageKey) {
+        return loadFileAsResource(storageKey);
     }
 }

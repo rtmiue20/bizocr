@@ -370,9 +370,9 @@ public class RegexExtractorService {
             return fields;
         }
 
-        // 1. Mã số thuế
+        // 1. Mã số thuế (Chỉ lấy khi có nhãn rõ ràng như MST, Mã số thuế)
         List<String> taxCandidates =
-                extractTaxCodeCandidates(text);
+                extractTaxCodeCandidates(text, true);
 
         candidateFilterService
                 .resolveTaxCode(taxCandidates)
@@ -492,7 +492,11 @@ public class RegexExtractorService {
                         || upper.contains("CO., LTD")
                         || upper.contains("CO.,LTD")
                         || upper.contains("CORPORATION")
-                        || upper.contains("LIMITED")) {
+                        || upper.contains("LIMITED")
+                        || upper.contains("TRAVEL")
+                        || upper.contains("LOGISTICS")
+                        || upper.contains("SOLUTIONS")
+                        || upper.contains("TECHNOLOGY")) {
 
                     fields.put("company_name", trimmed);
                     break;
@@ -500,124 +504,243 @@ public class RegexExtractorService {
             }
         }
 
-        // 5. Số điện thoại
-        Pattern mobilePattern = Pattern.compile(
-                "(?i)(?:Mobile|Cell|Hotline|DT|Tel|Phone)"
-                        + "[:\\s]*([+0-9\\-\\s.()]{8,20})"
+        // Nếu vẫn chưa có tên công ty, tìm thương hiệu ở các dòng đầu (vd: "Omega", "ATOZ")
+        if (!fields.containsKey("company_name")) {
+            for (int i = 0; i < Math.min(lines.length, 3); i++) {
+                String trimmed = lines[i].trim();
+                String upper = trimmed.toUpperCase();
+                if (upper.length() >= 2 && upper.length() <= 35) {
+                    if (!upper.contains("GIÁM ĐỐC")
+                            && !upper.contains("GIAM DOC")
+                            && !upper.contains("MANAGER")
+                            && !upper.contains("DIRECTOR")
+                            && !upper.contains("NGUYỄN")
+                            && !upper.contains("TRẦN")
+                            && !upper.contains("LÊ")
+                            && !upper.contains("PHẠM")
+                            && !upper.contains("@")
+                            && !upper.contains(".VN")
+                            && !upper.contains(".COM")
+                            && !upper.contains("QUẬN")
+                            && !upper.contains("TP.")
+                            && !upper.contains("HỒ CHÍ MINH")
+                            && !upper.contains("HO CHI MINH")
+                            && !upper.contains("ĐỒNG HÀNH")) {
+                        fields.put("company_name", trimmed);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 5. Số điện thoại & Fax
+        String mobileLabeled = null;
+        String landlineLabeled = null;
+        String faxLabeled = null;
+
+        Pattern mobileLabelPattern = Pattern.compile("(?i)(?:\\b(?:dd|đd|dld|dtdd|đtdđ|mobile|cell|hp|handphone)\\b|\\bdd\\b|\\bđd\\b)[\\s.:/-]*([+0-9\\s.()-]{8,20})");
+        Pattern landlineLabelPattern = Pattern.compile("(?i)(?:\\b(?:tel|phone|office|dt|đt)\\b)[\\s.:/-]*([+0-9\\s.()-]{8,20})");
+        Pattern faxLabelPattern = Pattern.compile("(?i)(?:\\b(?:fax|f)\\b)[\\s.:/-]*([+0-9\\s.()-]{8,20})");
+
+        Pattern anyPhonePattern = Pattern.compile("(?i)(?:\\+?84|0)[0-9 \\t.()-]{8,18}");
+        List<String> mobileList = new ArrayList<>();
+        List<String> landlineList = new ArrayList<>();
+
+        for (String line : lines) {
+            String trimmedLine = line.trim();
+
+            Matcher mobM = mobileLabelPattern.matcher(trimmedLine);
+            if (mobM.find() && mobileLabeled == null) {
+                mobileLabeled = mobM.group(1).trim();
+            }
+
+            Matcher landM = landlineLabelPattern.matcher(trimmedLine);
+            if (landM.find() && landlineLabeled == null) {
+                landlineLabeled = landM.group(1).trim();
+            }
+
+            Matcher faxM = faxLabelPattern.matcher(trimmedLine);
+            if (faxM.find() && faxLabeled == null) {
+                faxLabeled = faxM.group(1).trim();
+            }
+
+            Matcher m = anyPhonePattern.matcher(trimmedLine);
+            while (m.find()) {
+                String raw = m.group().trim();
+                String clean = raw.replaceAll("[^0-9+]", "");
+                if (clean.length() >= 9 && clean.length() <= 12) {
+                    String normClean = clean;
+                    if (clean.startsWith("+84") && clean.length() >= 11) {
+                        normClean = "0" + clean.substring(3);
+                    } else if (clean.startsWith("84") && clean.length() >= 11) {
+                        normClean = "0" + clean.substring(2);
+                    }
+                    boolean isMob = normClean.matches("^(?:0[3579]\\d{8}|08[12456789]\\d{7})$");
+                    if (isMob) {
+                        if (!mobileList.contains(raw)) mobileList.add(raw);
+                    } else {
+                        if (!landlineList.contains(raw)) landlineList.add(raw);
+                    }
+                }
+            }
+        }
+
+        // 5b. Gán vào phone (SĐT cá nhân)
+        String assignedMobile = null;
+        if (mobileLabeled != null) {
+            assignedMobile = mobileLabeled;
+            fields.put("phone", mobileLabeled);
+        } else if (!mobileList.isEmpty()) {
+            assignedMobile = mobileList.get(0);
+            fields.put("phone", assignedMobile);
+        }
+
+        // 5c. Gán vào company_phone (SĐT công ty)
+        List<String> remainingLandlines = new ArrayList<>(landlineList);
+        List<String> remainingMobiles = new ArrayList<>(mobileList);
+        if (assignedMobile != null) {
+            remainingMobiles.remove(assignedMobile);
+            String cleanAssigned = assignedMobile.replaceAll("[^0-9]", "");
+            remainingMobiles.removeIf(mStr -> mStr.replaceAll("[^0-9]", "").equals(cleanAssigned));
+        }
+
+        if (landlineLabeled != null) {
+            fields.put("company_phone", landlineLabeled);
+        } else if (!remainingLandlines.isEmpty()) {
+            fields.put("company_phone", remainingLandlines.remove(0));
+        } else if (!remainingMobiles.isEmpty()) {
+            fields.put("company_phone", remainingMobiles.remove(0));
+        }
+
+        // 5d. Gán vào fax
+        if (faxLabeled != null) {
+            fields.put("fax", faxLabeled);
+        } else if (!remainingLandlines.isEmpty()) {
+            fields.put("fax", remainingLandlines.remove(0));
+        } else if (!remainingMobiles.isEmpty()) {
+            fields.put("fax", remainingMobiles.remove(0));
+        }
+
+        // 6. Email (Cá nhân & Công ty)
+        Pattern emailExtractPattern = Pattern.compile(
+                "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
         );
+        Matcher allEmailMatcher = emailExtractPattern.matcher(text);
+        List<String> foundEmails = new ArrayList<>();
+        while (allEmailMatcher.find()) {
+            String em = sanitizeEmail(allEmailMatcher.group(0));
+            if (em != null && !em.isBlank() && !foundEmails.contains(em)) {
+                foundEmails.add(em);
+            }
+        }
 
-        Matcher mobileMatcher = mobilePattern.matcher(text);
+        // Nhận diện email bị lỗi OCR thiếu dấu @ (vd: vannhan.nomega.com.vn -> vannhan@omega.com.vn)
+        Pattern fuzzyEmailPattern = Pattern.compile(
+                "(?i)\\b([a-zA-Z0-9._%+-]+)(?:\\.n|\\.o|\\.at|\\s*@\\s*|\\s+at\\s+)([a-zA-Z0-9-]+\\.(?:com\\.vn|com|vn|net|org))\\b"
+        );
+        Matcher fuzzyEmailMatcher = fuzzyEmailPattern.matcher(text);
+        while (fuzzyEmailMatcher.find()) {
+            String reconstructed = fuzzyEmailMatcher.group(1).trim() + "@" + fuzzyEmailMatcher.group(2).trim();
+            String em = sanitizeEmail(reconstructed);
+            if (em != null && !em.isBlank() && !foundEmails.contains(em)) {
+                foundEmails.add(em);
+            }
+        }
 
-        if (mobileMatcher.find()) {
-            String cleanPhone = mobileMatcher
-                    .group(1)
-                    .trim()
-                    .replaceAll("[^0-9+]", "");
+        Pattern emailPrefixPattern = Pattern.compile(
+                "(?im)^[\\t ]*(?:E-?mail)[\\t ]*[:：]?[\\t ]*([^\\r\\n]+)"
+        );
+        Matcher emailPrefixMatcher = emailPrefixPattern.matcher(text);
+        if (emailPrefixMatcher.find()) {
+            String rawEmail = emailPrefixMatcher.group(1).trim();
+            String sanitized = sanitizeEmail(rawEmail);
+            if (sanitized != null && sanitized.contains("@") && !foundEmails.contains(sanitized)) {
+                foundEmails.add(0, sanitized);
+            }
+        }
 
-            fields.put("phone", cleanPhone);
+        for (String em : foundEmails) {
+            String lower = em.toLowerCase();
+            boolean isCompanyGeneric = lower.startsWith("info@")
+                    || lower.startsWith("contact@")
+                    || lower.startsWith("support@")
+                    || lower.startsWith("sales@")
+                    || lower.startsWith("office@")
+                    || lower.startsWith("admin@")
+                    || lower.startsWith("service@")
+                    || lower.startsWith("cskh@")
+                    || lower.startsWith("cty@")
+                    || lower.startsWith("company@");
 
+            if (isCompanyGeneric) {
+                if (!fields.containsKey("company_email")) {
+                    fields.put("company_email", em);
+                }
+            } else {
+                if (!fields.containsKey("email")) {
+                    fields.put("email", em);
+                } else if (!fields.containsKey("company_email")) {
+                    fields.put("company_email", em);
+                }
+            }
+        }
+
+        // 7. Website
+        Pattern websiteRegex = Pattern.compile(
+                "(?i)\\b(www\\.[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}|https?://[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})\\b"
+        );
+        Matcher webMatcher = websiteRegex.matcher(text);
+        if (webMatcher.find()) {
+            String rawWeb = webMatcher.group(1).trim();
+            String cleanedWeb = sanitizeWebsite(rawWeb);
+            if (cleanedWeb != null && !cleanedWeb.isBlank()) {
+                cleanedWeb = cleanedWeb.replaceAll("(?i)www\\.[a-z]*w{1,3}", "www.")
+                                       .replaceAll("(?i)www\\.+", "www.");
+                fields.put("website", cleanedWeb);
+            }
         } else {
-            Pattern rawPhonePattern = Pattern.compile(
-                    "\\b("
-                            + "0[0-9]{9,10}"
-                            + "|84-[0-9\\s]{9,12}"
-                            + "|\\+84[0-9\\s]{9,12}"
-                            + ")\\b"
+            Pattern websitePrefixPattern = Pattern.compile(
+                    "(?im)^[\\t ]*Website[\\t ]*[:：]?[\\t ]*([^\\r\\n]+)"
             );
-
-            Matcher rawPhoneMatcher =
-                    rawPhonePattern.matcher(text);
-
-            if (rawPhoneMatcher.find()) {
-                String cleanPhone = rawPhoneMatcher
-                        .group(1)
-                        .trim()
-                        .replaceAll("[^0-9+]", "");
-
-                fields.put("phone", cleanPhone);
-            }
-        }
-
-        /*
-         * 6. Email
-         *
-         * Quan trọng:
-         * Không dùng \\s trong group email vì \\s bao gồm cả newline.
-         * Regex cũ có thể capture:
-         *
-         * hung.nguyen@Atcit.com vn
-         * Website
-         *
-         * thành một chuỗi duy nhất.
-         *
-         * Regex mới bắt buộc bắt đầu từ dòng E-mail và dừng trước
-         * newline kế tiếp.
-         */
-        Pattern emailPattern = Pattern.compile(
-                "(?im)^[\\t ]*"
-                        + "(?:E-?mail)"
-                        + "[\\t ]*[:：]?[\\t ]*"
-                        + "([^\\r\\n]+)"
-        );
-
-        Matcher emailMatcher = emailPattern.matcher(text);
-
-        if (emailMatcher.find()) {
-            String rawEmail = emailMatcher.group(1).trim();
-            String sanitizedEmail = sanitizeEmail(rawEmail);
-
-            if (sanitizedEmail != null
-                    && !sanitizedEmail.isBlank()) {
-                fields.put("email", sanitizedEmail);
-            }
-        }
-
-        /*
-         * 7. Website
-         *
-         * Website cũng chỉ được capture trong cùng một dòng.
-         */
-        Pattern websitePattern = Pattern.compile(
-                "(?im)^[\\t ]*"
-                        + "Website"
-                        + "[\\t ]*[:：]?[\\t ]*"
-                        + "([^\\r\\n]+)"
-        );
-
-        Matcher websiteMatcher =
-                websitePattern.matcher(text);
-
-        if (websiteMatcher.find()) {
-            String rawWebsite =
-                    websiteMatcher.group(1).trim();
-
-            String sanitizedWebsite =
-                    sanitizeWebsite(rawWebsite);
-
-            if (sanitizedWebsite != null
-                    && !sanitizedWebsite.isBlank()) {
-                fields.put("website", sanitizedWebsite);
+            Matcher websitePrefixMatcher = websitePrefixPattern.matcher(text);
+            if (websitePrefixMatcher.find()) {
+                String rawWebsite = websitePrefixMatcher.group(1).trim();
+                String sanitizedWebsite = sanitizeWebsite(rawWebsite);
+                if (sanitizedWebsite != null && !sanitizedWebsite.isBlank()) {
+                    fields.put("website", sanitizedWebsite);
+                }
             }
         }
 
         // 8. Địa chỉ
+        String addrDetail = null;
+        String addrGeneral = null;
         for (String line : lines) {
             String trimmed = line.trim();
-            String normalized =
-                    stripAccents(trimmed).toLowerCase();
+            String normalized = stripAccents(trimmed).toLowerCase();
 
-            if (normalized.startsWith("tang ")
-                    || normalized.startsWith("so ")
-                    || normalized.contains("nguyen hue")
-                    || normalized.contains("quan ")
-                    || normalized.contains("tp.hcm")
-                    || normalized.contains("ha noi")
-                    || normalized.startsWith("dia chi:")
-                    || normalized.startsWith("address:")) {
-
-                fields.put("address", trimmed);
-                break;
+            if (normalized.contains("dia chi:") || normalized.contains("dia chre") || normalized.contains("address:")
+                    || normalized.matches(".*\\d+[/-][\\d\\w/-]+.*")) {
+                String cleanDetail = trimmed.replaceAll("(?i)^[\\(\\s]*(?:dia chi|address|dia chre)[\t :：]*", "")
+                                           .replaceAll("[\\)\\s]+$", "")
+                                           .trim();
+                if (addrDetail == null || cleanDetail.length() > addrDetail.length()) {
+                    addrDetail = cleanDetail;
+                }
+            } else if (normalized.contains("quan ") || normalized.contains("tp.hcm") || normalized.contains("ho chi minh")
+                    || normalized.contains("ha noi") || normalized.startsWith("tang ") || normalized.startsWith("so ")) {
+                if (addrGeneral == null) {
+                    addrGeneral = trimmed;
+                }
             }
+        }
+
+        if (addrDetail != null && addrGeneral != null && !addrDetail.contains(addrGeneral)) {
+            fields.put("address", addrDetail + ", " + addrGeneral);
+        } else if (addrDetail != null) {
+            fields.put("address", addrDetail);
+        } else if (addrGeneral != null) {
+            fields.put("address", addrGeneral);
         }
 
         return fields;
@@ -702,6 +825,10 @@ public class RegexExtractorService {
     }
 
     public List<String> extractTaxCodeCandidates(String text) {
+        return extractTaxCodeCandidates(text, false);
+    }
+
+    public List<String> extractTaxCodeCandidates(String text, boolean labeledOnly) {
         if (text == null || text.isBlank()) {
             return List.of();
         }
@@ -735,7 +862,7 @@ public class RegexExtractorService {
             }
         }
 
-        if (!candidates.isEmpty()) {
+        if (!candidates.isEmpty() || labeledOnly) {
             return candidates;
         }
 

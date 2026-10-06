@@ -4,6 +4,7 @@ import com.company.bizocr.classify.ClassifierService;
 import com.company.bizocr.company.CompanyResolverService;
 import com.company.bizocr.model.dto.ClassifyResult;
 import com.company.bizocr.model.dto.CompanySuggestion;
+import com.company.bizocr.model.entity.DocumentStatus; // Thêm import DocumentStatus
 import com.company.bizocr.service.FieldAuditService;
 import com.company.bizocr.model.dto.request.DocumentUpdateRequest;
 import com.company.bizocr.model.dto.response.DocumentPageResponse;
@@ -25,6 +26,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.multipart.FilePart;
+import com.company.bizocr.model.entity.DocumentImage;
+import com.company.bizocr.repository.DocumentImageRepository;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
@@ -39,6 +42,7 @@ import java.util.Map;
 public class DocumentController {
 
     private final DocumentRepository documentRepository;
+    private final DocumentImageRepository documentImageRepository;
     private final StorageService storageService;
     private final ReactiveStringRedisTemplate redisTemplate;
     private final ExcelExportService excelExportService;
@@ -65,7 +69,22 @@ public class DocumentController {
                                     .receivedAt(LocalDateTime.now().toString())
                                     .build();
 
-                            return documentRepository.save(record);
+                            return documentRepository.save(record)
+                                    .flatMap(savedRecord -> {
+                                        DocumentImage frontImg = DocumentImage.builder()
+                                                .documentId(savedRecord.getId())
+                                                .side("FRONT")
+                                                .storageKey(savedFilePath)
+                                                .ocrStatus("PENDING")
+                                                .uploadedAt(LocalDateTime.now())
+                                                .build();
+                                        return documentImageRepository.save(frontImg)
+                                                .thenReturn(savedRecord)
+                                                .onErrorResume(e -> {
+                                                    log.warn("[Upload] Không thể tạo document_images FRONT: {}", e.getMessage());
+                                                    return Mono.just(savedRecord);
+                                                });
+                                    });
                         })
                 )
                 .flatMap(savedRecord ->
@@ -81,6 +100,48 @@ public class DocumentController {
                         .status(savedRecord.getStatus())
                         .message("File đã được tiếp nhận và đưa vào hàng đợi xử lý ngầm (Redis Queue)")
                         .build());
+    }
+
+    // API Upload ảnh bổ sung (VD: mặt sau namecard)
+    @PostMapping(value = "/{id}/images/{side}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Mono<DocumentImage> uploadDocumentImage(
+            @PathVariable Long id,
+            @PathVariable String side,
+            @RequestPart("file") FilePart filePart) {
+        String cleanSide = side.toUpperCase().trim();
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> documentRepository.findByIdAndOwnerCompanyId(id, currentUser.companyId())
+                        .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ")))
+                        .flatMap(doc -> storageService.saveFile(filePart)
+                                .flatMap(savedKey -> {
+                                    DocumentImage img = DocumentImage.builder()
+                                            .documentId(doc.getId())
+                                            .side(cleanSide)
+                                            .storageKey(savedKey)
+                                            .ocrStatus("PENDING")
+                                            .uploadedAt(LocalDateTime.now())
+                                            .build();
+                                    return documentImageRepository.findByDocumentIdAndSide(doc.getId(), cleanSide)
+                                            .flatMap(existing -> {
+                                                existing.setStorageKey(savedKey);
+                                                existing.setUploadedAt(LocalDateTime.now());
+                                                return documentImageRepository.save(existing);
+                                            })
+                                            .switchIfEmpty(Mono.defer(() -> documentImageRepository.save(img)));
+                                })
+                        )
+                );
+    }
+
+    @GetMapping("/{id}/images")
+    public Mono<List<DocumentImage>> getDocumentImages(@PathVariable Long id) {
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> documentRepository.findByIdAndOwnerCompanyId(id, currentUser.companyId())
+                        .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ")))
+                        .flatMap(doc -> documentImageRepository.findByDocumentId(doc.getId()).collectList())
+                );
     }
 
     // API Phân loại nhanh văn bản OCR
@@ -227,6 +288,13 @@ public class DocumentController {
                 .flatMap(currentUser -> documentRepository.findByIdAndOwnerCompanyId(id, currentUser.companyId())
                         .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền cập nhật")))
                         .flatMap(doc -> {
+
+                            // CHẶN SỬA KHI ĐÃ APPROVED
+                            if (DocumentStatus.APPROVED.name().equals(doc.getStatus())) {
+                                return Mono.error(new ResponseStatusException(HttpStatus.CONFLICT,
+                                        "Tài liệu đã APPROVED, không thể sửa"));
+                            }
+
                             // Gọi FieldAuditService mà không cần truyền currentUser (vì Service đã tự handle)
                             Mono<Void> auditMono = (request.getExtractedFields() != null)
                                     ? fieldAuditService.logFieldCorrections(doc, request.getExtractedFields())

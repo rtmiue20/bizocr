@@ -120,6 +120,41 @@ public class Document {
     @Column("contact_title")
     private String contactTitle;
 
+    // ── ML / Continuous Learning fields ──────────────────────────────────────
+
+    /**
+     * Snapshot JSON dự đoán của model tại thời điểm bóc tách — KHÔNG bị human ghi đè.
+     * Dùng để so sánh với extractedFields sau khi kế toán sửa, phát hiện sai số của model.
+     */
+    @Column("predicted_fields_json")
+    @ReadOnlyProperty
+    private String predictedFieldsJson;
+
+    /**
+     * true khi kế toán đánh dấu đây là dữ liệu tin cậy (human_verified = 1).
+     * Truyền từ DocumentApproveRequest.humanVerified, không được pipeline tự gán.
+     */
+    @Column("human_verified")
+    @ReadOnlyProperty
+    private Boolean humanVerified;
+
+    /**
+     * true khi document đủ điều kiện đưa vào lô huấn luyện:
+     * trustedLabeler && humanVerified && qua validator && TransitionResult != IDEMPOTENT.
+     * Do DocumentApprovalService gán sau khi duyệt.
+     */
+    @Column("training_eligible")
+    @ReadOnlyProperty
+    private Boolean trainingEligible;
+
+    /**
+     * FK tới training_batches.id — được gán khi document đã được gom vào lô.
+     * null khi chưa gom.
+     */
+    @Column("training_batch_id")
+    @ReadOnlyProperty
+    private Long trainingBatchId;
+
     @Column("tax_code")
     @ReadOnlyProperty
     private String taxCode;

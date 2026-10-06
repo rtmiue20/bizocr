@@ -1,15 +1,17 @@
 package com.company.bizocr.service;
 
 import com.company.bizocr.extract.DocumentFieldSchema;
+import com.company.bizocr.extract.NamecardSanitizer;
 import com.company.bizocr.model.dto.OllamaTaskPayload;
-import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.repository.DocumentRepository;
 import com.company.bizocr.validator.ExtractionValidatorService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -29,7 +31,7 @@ public class OllamaQueueService implements SmartLifecycle {
     private static final String QUEUE_NAME = "ocr:ollama:tasks";
     private static final String PROCESSING_QUEUE = "ocr:ollama:processing";
     private static final String FAILED_QUEUE = "ocr:ollama:failed";
-    private static final String AI_MODEL_VERSION = "ollama-local";
+
     private final Scheduler ollamaScheduler = Schedulers.newBoundedElastic(2, 100, "ollama-worker");
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private Disposable workerDisposable;
@@ -39,6 +41,11 @@ public class OllamaQueueService implements SmartLifecycle {
     private final ChatClient chatClient;
     private final ExtractionValidatorService extractionValidatorService;
     private final DocumentRepository documentRepository;
+
+    @Value("${spring.ai.ollama.chat.options.model:ollama-local}")
+    private String ollamaModel;
+
+    private record AiResult(Long docId, String json, String contactName, String contactTitle) {}
 
     public OllamaQueueService(
             StringRedisTemplate redisTemplate,
@@ -99,12 +106,6 @@ public class OllamaQueueService implements SmartLifecycle {
         return true;
     }
 
-    /**
-     * Phase cao (ví dụ: Integer.MAX_VALUE - 1000) đảm bảo:
-     * - Khi STARTUP: LettuceConnectionFactory (Phase 0) khởi động trước, OllamaQueueService khởi động sau.
-     * - Khi SHUTDOWN: Spring dừng SmartLifecycle theo thứ tự Phase giảm dần -> OllamaQueueService (Phase cao) dừng trước,
-     * LettuceConnectionFactory (Phase 0) dừng sau, triệt tiêu 100% race condition "LettuceConnectionFactory has been STOPPED".
-     */
     @Override
     public int getPhase() {
         return Integer.MAX_VALUE - 1000;
@@ -115,6 +116,13 @@ public class OllamaQueueService implements SmartLifecycle {
             log.warn(">> [Ollama Worker] Worker đã đang chạy.");
             return;
         }
+
+        // Khôi phục task bị kẹt khi khởi động
+        String stuck;
+        while ((stuck = redisTemplate.opsForList().rightPopAndLeftPush(PROCESSING_QUEUE, QUEUE_NAME)) != null) {
+            log.warn(">> [Ollama Worker] Khôi phục task kẹt trong PROCESSING_QUEUE");
+        }
+
         this.workerDisposable = Flux.interval(Duration.ofSeconds(1))
                 .takeWhile(tick -> isRunning.get())
                 .publishOn(ollamaScheduler)
@@ -151,67 +159,64 @@ public class OllamaQueueService implements SmartLifecycle {
     }
 
     private Mono<Void> processNextTask() {
-        if (!isRunning.get()) {
-            return Mono.empty();
-        }
+        if (!isRunning.get()) return Mono.empty();
+        return Mono.fromCallable(() ->
+                        redisTemplate.opsForList().rightPopAndLeftPush(QUEUE_NAME, PROCESSING_QUEUE)) // nguyên tử
+                .filter(payload -> payload != null && isRunning.get())
+                .flatMap(payload -> handleTask(payload)
+                        .onErrorResume(err -> {
+                            log.error(">> [Ollama Worker] Task lỗi, chuyển sang FAILED_QUEUE:", err);
+                            moveToFailed(payload);
+                            return Mono.empty();
+                        }));
+    }
 
-        // 1. Pop task từ Redis
-        return Mono.fromCallable(() -> redisTemplate.opsForList().rightPop(QUEUE_NAME))
-                // 2. Nếu có task và service đang chạy thì đi tiếp
-                .filter(jsonPayload -> jsonPayload != null && isRunning.get())
-                // 3. Xử lý logic
-                .flatMap(jsonPayload -> {
-                    try {
-                        OllamaTaskPayload task = objectMapper.readValue(jsonPayload, OllamaTaskPayload.class);
-                        log.info(">> [Ollama Worker] Bắt đầu xử lý AI cho DocID: {}", task.getDocumentId());
-
-                        String rawJsonResult = callOllamaSync(task.getDocumentType(), task.getRawText());
-                        String validatedJson = extractionValidatorService.validateAndSanitize(task.getDocumentType(), rawJsonResult);
-
-                        // Cố định bộ key theo loại chứng từ (NAMECARD -> contact_name, company_name, tax_code, ...).
-                        // Loại chưa khai báo schema thì giữ nguyên.
-                        String finalValidatedJson = DocumentFieldSchema.normalize(task.getDocumentType(), validatedJson, objectMapper);
-
-                        log.info(">> [Ollama Worker] Hoàn tất bóc tách AI cho DocID: {}. Result: {}", task.getDocumentId(), finalValidatedJson);
-
-                        Long docId = Long.valueOf(task.getDocumentId());
-
-                        // 4. Luồng Reactive DB: Gọi findById -> Cập nhật entity -> Gọi save
-                        return documentRepository.findById(docId)
-                                .flatMap(doc -> {
-                                    doc.setExtractedFields(finalValidatedJson);
-
-                                    try {
-                                        JsonNode rootNode = objectMapper.readTree(finalValidatedJson);
-                                        // Ưu tiên key chuẩn (contact_name/contact_title), fallback key cũ (name/title)
-                                        String contactName = firstText(rootNode, "contact_name", "name");
-                                        String contactTitle = firstText(rootNode, "contact_title", "title");
-                                        if (contactName != null) {
-                                            doc.setContactName(contactName);
-                                        }
-                                        if (contactTitle != null) {
-                                            doc.setContactTitle(contactTitle);
-                                        }
-                                    } catch (Exception ex) {
-                                        log.warn(">> [Ollama Worker] Lỗi parse JSON map field cho DocID: {}", docId);
-                                    }
-
-                                    // Return lệnh lưu DB vào luồng chính
-                                    return documentRepository.save(doc);
-                                })
-                                .doOnSuccess(saved -> log.info(">> [Ollama Worker] Đã cập nhật kết quả vào DB cho DocID: {}", docId))
-                                // Chuyển kết quả cuối cùng về Mono<Void> để khớp với processNextTask()
-                                .then();
-
-                    } catch (Exception e) {
-                        return Mono.error(e);
+    private Mono<Void> handleTask(String payload) {
+        return Mono.fromCallable(() -> {
+                    OllamaTaskPayload task = objectMapper.readValue(payload, OllamaTaskPayload.class);
+                    String raw = callOllamaSync(task.getDocumentType(), task.getRawText()); // ném lỗi nếu Ollama fail
+                    String validated = extractionValidatorService.validateAndSanitize(task.getDocumentType(), raw);
+                    String json = DocumentFieldSchema.normalize(task.getDocumentType(), validated, objectMapper);
+                    JsonNode root = objectMapper.readTree(json);
+                    if (root.isObject() && ("NAMECARD".equalsIgnoreCase(task.getDocumentType())
+                            || "NAME_CARD".equalsIgnoreCase(task.getDocumentType())
+                            || "DANH_THIEP".equalsIgnoreCase(task.getDocumentType()))) {
+                        root = NamecardSanitizer.sanitize((ObjectNode) root, task.getRawText(), objectMapper);
+                        json = objectMapper.writeValueAsString(root);
                     }
+                    return new AiResult(Long.valueOf(task.getDocumentId()), json,
+                            firstText(root, "contact_name", "name"),
+                            firstText(root, "contact_title", "title"));
                 })
-                // Hứng lỗi riêng lẻ không làm sập Worker
-                .onErrorResume(error -> {
-                    log.error(">> [Ollama Worker] Lỗi khi xử lý 1 task cụ thể, nuốt lỗi để worker tiếp tục chạy:", error);
-                    return Mono.empty();
-                });
+                .flatMap(r -> documentRepository.updateAiExtractionIfNotReviewed(
+                                r.docId(), r.json(), "ollama:" + ollamaModel, r.contactName(), r.contactTitle())
+                        .doOnNext(rows -> {
+                            if (rows == 0) log.info(">> [Ollama Worker] Bỏ kết quả AI cho DocID={} (đã có người đụng vào)", r.docId());
+                            else log.info(">> [Ollama Worker] Đã ghi kết quả AI cho DocID={}", r.docId());
+                        }))
+                .doOnSuccess(x -> redisTemplate.opsForList().remove(PROCESSING_QUEUE, 1, payload))
+                .then();
+    }
+
+    private void moveToFailed(String payload) {
+        redisTemplate.opsForList().remove(PROCESSING_QUEUE, 1, payload);
+        redisTemplate.opsForList().leftPush(FAILED_QUEUE, payload);
+        try {
+            OllamaTaskPayload task = objectMapper.readValue(payload, OllamaTaskPayload.class);
+            if (task.getDocumentId() != null) {
+                Long docId = Long.valueOf(task.getDocumentId());
+                String failedJson = objectMapper.writeValueAsString(java.util.Map.of(
+                        "review_status", "AI_FAILED",
+                        "document_id", docId,
+                        "message", "AI bóc tách thất bại hoặc quá tải"
+                ));
+                documentRepository.updateAiExtractionIfNotReviewed(
+                        docId, failedJson, "ollama:failed", null, null
+                ).subscribe();
+            }
+        } catch (Exception e) {
+            log.error("Lỗi khi cập nhật trạng thái thất bại cho task", e);
+        }
     }
 
     /**
@@ -230,50 +235,63 @@ public class OllamaQueueService implements SmartLifecycle {
     }
 
     private String callOllamaSync(String documentType, String rawText) {
-        try {
-            String jsonTemplate = getJsonTemplateForDocument(documentType);
+        String jsonTemplate = getJsonTemplateForDocument(documentType);
 
-            String promptText = """
-                    [TASK]
-                    Trích xuất thông tin cốt lõi từ văn bản OCR thô và điền chính xác vào khung JSON mẫu.
-                    
-                    [CONTEXT]
-                    Bạn là chuyên gia AI bóc tách chứng từ, hóa đơn và danh thiếp Việt Nam. Văn bản OCR đầu vào thường chứa nhiều nhiễu, câu chữ rác (quảng cáo, slogan), lỗi xuống dòng và bị khuyết dữ liệu.
-                    
-                    [REFERENCE]
-                    Khung JSON mẫu bắt buộc dùng làm mốc đối chiếu:
-                    %s
-                    
-                    [EVALUATION / EXPECTED OUTPUT]
-                    1. Trả về DUY NHẤT một chuỗi JSON hợp lệ.
-                    2. KHÔNG bọc trong Markdown codeblock (```json).
-                    3. KHÔNG chứa lời chào, giải thích hay bất kỳ văn bản nào khác ngoài JSON.
-                    4. Bắt buộc sử dụng đúng 100%% tên key từ khung mẫu tại [REFERENCE].
-                    
-                    [ITERATE / REFINEMENT INSTRUCTIONS]
-                    - Bước 1 (Lọc rác): Quét văn bản OCR và chủ động loại bỏ các từ rác/slogan (vd: "Cloud", "Server", "Free Shipping", "Mẫu số...").
-                    - Bước 2 (Khớp dữ liệu): Đối chiếu từng thông tin tìm thấy với các key tương ứng trong khung [REFERENCE].
-                    - Bước 3 (Xử lý khuyết): Nếu một key không có dữ liệu trong văn bản, BẮT BUỘC gán giá trị key đó là null (không tự bịa hay suy diễn).
-                    - Bước 4 (Tự kiểm định): Rà soát lại JSON lần cuối, nếu phát hiện key rác hoặc key bị đổi tên ngoài khung [REFERENCE], hãy loại bỏ và đưa về đúng chuẩn trước khi xuất kết quả.
-                    
-                    [INPUT]
-                    - Loại chứng từ: %s
-                    - Văn bản OCR (RawText):
-                    \"\"\"
-                    %s
-                    \"\"\"
-                    """.formatted(jsonTemplate, documentType, rawText);
-
-            String response = chatClient.prompt().user(promptText).call().content();
-
-            // Làm sạch chuỗi trả về
-            return response.replaceAll("(?s)```json\\s*", "")
-                    .replaceAll("(?s)```\\s*", "")
-                    .trim();
-        } catch (Exception e) {
-            log.error(">> [Ollama Engine] Lỗi khi gọi Ollama", e);
-            return "{\"error\":\"ollama_processing_failed\"}";
+        String specificInstructions = "";
+        if ("NAMECARD".equalsIgnoreCase(documentType) || "NAME_CARD".equalsIgnoreCase(documentType) || "DANH_THIEP".equalsIgnoreCase(documentType)) {
+            specificInstructions = """
+                
+                [QUY TẮC BẮT BUỘC RIÊNG CHO DANH THIẾP / NAMECARD]
+                1. SĐT cá nhân (phone): BẮT BUỘC là số di động (bắt đầu bằng 09, 03, 07, 05, hoặc 081-089, +84). KHÔNG BAO GIỜ gộp nhiều số bằng dấu phẩy.
+                2. SĐT công ty (company_phone): Là số điện thoại cố định / máy bàn (bắt đầu bằng 02x, hoặc 08/04 mã vùng cũ, vd: 08 3847 6888).
+                3. Fax: Số fax (thường là số máy bàn thứ hai, hoặc có tiền tố Fax, vd: 08 3847 9080).
+                4. Tên công ty (company_name): Lấy tên thương hiệu / tên công ty viết hoa (vd: "ATOZ", "ATOZ TRAVEL"). TUYỆT ĐỐI KHÔNG điền tên miền website (như Qatoztravel.vn, abc.com) vào trường tên công ty.
+                5. Email cá nhân (email): Chỉ điền địa chỉ email thật (user@domain). KHÔNG điền nick Skype, Yahoo ID hay chuỗi có chữ /Skype, /Zalo. Nếu không có thì để null.
+                6. Email công ty (company_email): Email chung (cskh@..., info@...). Loại bỏ ký tự OCR sai sau dấu @ nếu có (vd: cskh@Qatoztravel.vn -> cskh@atoztravel.vn).
+                """;
         }
+
+        String promptText = """
+                [TASK]
+                Trích xuất thông tin cốt lõi từ văn bản OCR thô và điền chính xác vào khung JSON mẫu.
+                
+                [CONTEXT]
+                Bạn là chuyên gia AI bóc tách chứng từ, hóa đơn và danh thiếp Việt Nam. Văn bản OCR đầu vào thường chứa nhiều nhiễu, câu chữ rác (quảng cáo, slogan), lỗi xuống dòng và bị khuyết dữ liệu.
+                
+                [REFERENCE]
+                Khung JSON mẫu bắt buộc dùng làm mốc đối chiếu:
+                %s
+                
+                [EVALUATION / EXPECTED OUTPUT]
+                1. Trả về DUY NHẤT một chuỗi JSON hợp lệ.
+                2. KHÔNG bọc trong Markdown codeblock (```json).
+                3. KHÔNG chứa lời chào, giải thích hay bất kỳ văn bản nào khác ngoài JSON.
+                4. Bắt buộc sử dụng đúng 100%% tên key từ khung mẫu tại [REFERENCE].
+                
+                [ITERATE / REFINEMENT INSTRUCTIONS]
+                - Bước 1 (Lọc rác): Quét văn bản OCR và chủ động loại bỏ các từ rác/slogan (vd: "Cloud", "Server", "Free Shipping", "Mẫu số...").
+                - Bước 2 (Khớp dữ liệu): Đối chiếu từng thông tin tìm thấy với các key tương ứng trong khung [REFERENCE].
+                - Bước 3 (Xử lý khuyết): Nếu một key không có dữ liệu trong văn bản, BẮT BUỘC gán giá trị key đó là null (không tự bịa hay suy diễn).
+                - Bước 4 (Tự kiểm định): Rà soát lại JSON lần cuối, nếu phát hiện key rác hoặc key bị đổi tên ngoài khung [REFERENCE], hãy loại bỏ và đưa về đúng chuẩn trước khi xuất kết quả.%s
+                
+                [INPUT]
+                - Loại chứng từ: %s
+                - Văn bản OCR (RawText):
+                \"\"\"
+                %s
+                \"\"\"
+                """.formatted(jsonTemplate, specificInstructions, documentType, rawText);
+
+        String response = chatClient.prompt().user(promptText).call().content();
+
+        if (response == null || response.isBlank()) {
+            throw new IllegalStateException("Ollama trả về rỗng");
+        }
+
+        // Làm sạch chuỗi trả về
+        return response.replaceAll("(?s)```json\\s*", "")
+                .replaceAll("(?s)```\\s*", "")
+                .trim();
     }
 
     /**

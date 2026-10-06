@@ -60,6 +60,7 @@ public class AuthController {
                             .expiresAt(now.plusSeconds(36000)) // Token sống 10 tiếng
                             .claim("roles", List.of(user.getRole())) // Trích xuất role từ user trong DB
                             .claim("companyId", user.getCompanyId()) // Gắn ID Company thực tế
+                            .claim("trusted_labeler", user.isTrustedLabeler()) // Quyền tạo training data
                             .build();
 
                     JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();

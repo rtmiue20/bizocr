@@ -57,6 +57,9 @@ bizocr:
   validator:
     shadow-mode: ${VALIDATOR_SHADOW_MODE:true}
 
+  learning:
+    batch-size: ${LEARNING_BATCH_SIZE:25}
+
   ollama:
     auto-manage: true      # true = Spring Boot tự quản lý Ollama process
     force-cpu: true         # true = ép CPU-only

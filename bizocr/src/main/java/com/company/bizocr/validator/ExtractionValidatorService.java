@@ -70,6 +70,45 @@ public class ExtractionValidatorService {
     }
 
     /**
+     * Kiểm tra nhanh xem dữ liệu trích xuất có hợp lệ theo schema và business rules hay không.
+     * Độc lập với shadowMode — luôn trả về tính hợp lệ thực tế của dữ liệu.
+     */
+    public boolean isValid(String documentType, String jsonOutput, String rawOcrText) {
+        return generateReport(documentType, jsonOutput, rawOcrText).isValid();
+    }
+
+    /**
+     * Sinh báo cáo thẩm định dữ liệu (Schema violations, Business rules, Grounding).
+     */
+    public ValidationReport generateReport(String documentType, String jsonOutput, String rawOcrText) {
+        ValidationReport report = new ValidationReport();
+        report.setValid(true);
+        if (jsonOutput == null || jsonOutput.isBlank()) {
+            report.addError("JSON input rỗng");
+            return report;
+        }
+        try {
+            Object parsedDto = parseToDto(documentType, jsonOutput);
+            JsonNode rootNode = objectMapper.readTree(jsonOutput);
+            ObjectNode outputNode = rootNode.isObject() ? (ObjectNode) rootNode : objectMapper.createObjectNode();
+
+            if (parsedDto != null) {
+                Set<ConstraintViolation<Object>> violations = validator.validate(parsedDto);
+                if (!violations.isEmpty()) {
+                    for (ConstraintViolation<Object> v : violations) {
+                        String msg = String.format("Schema vi phạm ở field '%s': %s", v.getPropertyPath(), v.getMessage());
+                        report.addError(msg);
+                    }
+                }
+            }
+            checkBusinessRules(documentType, outputNode, rawOcrText, report);
+        } catch (Exception e) {
+            report.addError("Lỗi parse JSON: " + e.getMessage());
+        }
+        return report;
+    }
+
+    /**
      * Phương thức mới tích hợp kiểm tra sâu và Shadow Mode telemetry.
      */
     public String validateAndSanitize(String documentType, String jsonOutput, String rawOcrText) {

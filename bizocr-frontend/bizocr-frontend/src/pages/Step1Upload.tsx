@@ -13,11 +13,13 @@ const size = (n: number) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `$
 
 export default function Step1Upload({onUploaded}: { onUploaded: (firstId: number) => void }) {
     const [files, setFiles] = useState<File[]>([])
+    const [backFile, setBackFile] = useState<File | null>(null)
     const [drag, setDrag] = useState(false)
     const [busy, setBusy] = useState(false)
     const [err, setErr] = useState('')
     const [stats, setStats] = useState<Record<string, number>>({})
     const picker = useRef<HTMLInputElement>(null)
+    const backPicker = useRef<HTMLInputElement>(null)
 
     // Camera states & refs
     const [cameraOpen, setCameraOpen] = useState(false)
@@ -52,9 +54,17 @@ export default function Step1Upload({onUploaded}: { onUploaded: (firstId: number
         setErr('')
         try {
             const ids: number[] = []
-            for (const f of files) {
-                ids.push((await api.upload(f)).documentId)
-                setFiles((cur) => cur.slice(1))
+            for (let i = 0; i < files.length; i++) {
+                const f = files[i]
+                const res = await api.upload(f)
+                ids.push(res.documentId)
+                if (i === 0 && backFile) {
+                    try {
+                        await api.uploadImage(res.documentId, 'BACK', backFile)
+                    } catch (e) {
+                        console.error('Không thể upload mặt sau:', e)
+                    }
+                }
             }
             onUploaded(ids[0])
         } catch (e) {
@@ -223,6 +233,50 @@ export default function Step1Upload({onUploaded}: { onUploaded: (firstId: number
                                     </button>
                                 </div>
                             ))}
+
+                            {/* Tùy chọn đính kèm mặt sau cho Namecard */}
+                            <div className="rounded-xl border border-dashed border-outline-variant bg-surface-container-high/50 p-3">
+                                <input
+                                    ref={backPicker}
+                                    type="file"
+                                    accept="image/*"
+                                    hidden
+                                    onChange={(e) => {
+                                        const f = e.target.files?.[0]
+                                        if (f) setBackFile(f)
+                                        e.target.value = ''
+                                    }}
+                                />
+                                <div className="flex items-center justify-between text-xs">
+                                    <div className="flex items-center gap-2">
+                                        <span className="material-symbols-outlined text-primary text-[18px]">flip</span>
+                                        <span className="font-semibold text-on-surface">Mặt sau danh thiếp (tùy chọn):</span>
+                                        {backFile ? (
+                                            <span className="text-primary font-medium truncate max-w-[200px]">{backFile.name}</span>
+                                        ) : (
+                                            <span className="text-on-surface-variant italic">Chưa chọn ảnh</span>
+                                        )}
+                                    </div>
+                                    {backFile ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setBackFile(null)}
+                                            className="text-error font-medium hover:underline"
+                                        >
+                                            Gỡ bỏ
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => backPicker.current?.click()}
+                                            className="rounded-md border border-outline px-2.5 py-1 text-primary hover:bg-surface"
+                                        >
+                                            + Đính kèm mặt sau
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
                             {err && <p role="alert" className="font-body-md text-body-md text-error">{err}</p>}
                             <button
                                 type="button"

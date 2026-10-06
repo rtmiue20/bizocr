@@ -18,6 +18,8 @@ import com.company.bizocr.security.CurrentUser;
 import com.company.bizocr.statemachine.DocumentStateMachine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import com.company.bizocr.validator.ExtractionValidatorService;
+import com.company.bizocr.service.TrainingBatchService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -29,6 +31,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
@@ -49,12 +52,13 @@ class DocumentApprovalServiceTest {
     private CompanyRepository companyRepository;
     private CompanyAliasRepository aliasRepository;
     private TaxApiClient taxApiClient;
-    private PythonMlClient pythonMlClient;
     private CompanyNameNormalizer nameNormalizer;
     private ExternalTaxSearchService externalTaxSearchService;
     private IndustryRepository industryRepository;
     private FieldAuditService fieldAuditService;
     private DocumentStateMachine stateMachine;
+    private ExtractionValidatorService extractionValidatorService;
+    private TrainingBatchService trainingBatchService;
     private DocumentApprovalService service;
 
     @BeforeEach
@@ -63,21 +67,24 @@ class DocumentApprovalServiceTest {
         companyRepository = mock(CompanyRepository.class);
         aliasRepository = mock(CompanyAliasRepository.class);
         taxApiClient = mock(TaxApiClient.class);
-        pythonMlClient = mock(PythonMlClient.class);
         nameNormalizer = new CompanyNameNormalizer(); // implementation thật
         externalTaxSearchService = mock(ExternalTaxSearchService.class);
         industryRepository = mock(IndustryRepository.class);
         fieldAuditService = mock(FieldAuditService.class);
         stateMachine = mock(DocumentStateMachine.class);
+        extractionValidatorService = mock(ExtractionValidatorService.class);
+        trainingBatchService = mock(TrainingBatchService.class);
 
         service = new DocumentApprovalService(
                 documentRepository, companyRepository, aliasRepository, taxApiClient,
-                new ObjectMapper(), pythonMlClient, nameNormalizer, externalTaxSearchService,
-                industryRepository, fieldAuditService, stateMachine);
+                new ObjectMapper(), nameNormalizer, externalTaxSearchService,
+                industryRepository, fieldAuditService, stateMachine,
+                extractionValidatorService, trainingBatchService);
 
         // Stub các nhánh phụ không liên quan tới bất biến đang test, để test tập trung vào upsertCompany
-        when(fieldAuditService.logFieldCorrections(any(Document.class), anyString())).thenReturn(Mono.empty());
-        when(pythonMlClient.collectApprovedData(anyString(), anyString())).thenReturn(Mono.empty());
+        when(fieldAuditService.logFieldCorrections(any(Document.class), anyString(), anyString())).thenReturn(Mono.empty());
+        when(extractionValidatorService.isValid(any(), any(), any())).thenReturn(true);
+        when(trainingBatchService.enrollDocument(any())).thenReturn(Mono.empty());
         when(externalTaxSearchService.searchCompanyInfoOnline(anyString(), any()))
                 .thenReturn(Mono.error(new RuntimeException("bỏ qua trong test này")));
         when(industryRepository.findByCodeInAndIsActiveTrue(any())).thenReturn(Flux.empty());

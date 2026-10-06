@@ -12,9 +12,13 @@ import com.company.bizocr.model.entity.Company;
 import com.company.bizocr.model.entity.CompanyAlias;
 import com.company.bizocr.model.entity.CompanyVerificationSource;
 import com.company.bizocr.model.entity.CompanyVerificationStatus;
+import com.company.bizocr.model.entity.Document;
 import com.company.bizocr.model.entity.DocumentStatus;
 import com.company.bizocr.repository.*;
+import com.company.bizocr.validator.ExtractionValidatorService;
 import com.company.bizocr.security.CurrentUser;
+import com.company.bizocr.model.entity.Contact;
+import com.company.bizocr.service.ContactDeduplicationService;
 import com.company.bizocr.statemachine.DocumentStateMachine;
 import com.company.bizocr.statemachine.DocumentStateMachine.TransitionResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,7 +30,9 @@ import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -38,12 +44,14 @@ public class DocumentApprovalService {
     private final CompanyAliasRepository aliasRepository;
     private final TaxApiClient taxApiClient;
     private final ObjectMapper objectMapper;
-    private final PythonMlClient pythonMlClient;
     private final CompanyNameNormalizer nameNormalizer;
     private final ExternalTaxSearchService externalTaxSearchService;
     private final IndustryRepository industryRepository;
     private final FieldAuditService fieldAuditService;
     private final DocumentStateMachine stateMachine;
+    private final ExtractionValidatorService extractionValidatorService;
+    private final TrainingBatchService trainingBatchService;
+    private final ContactDeduplicationService contactDeduplicationService;
 
     @Transactional
     public Mono<DocumentApproveResponse> approveDocument(Long documentId, DocumentApproveRequest request, CurrentUser reviewer) {
@@ -62,16 +70,23 @@ public class DocumentApprovalService {
                                 "Không thể duyệt document ở trạng thái: " + currentStatus));
                     }
 
+                    // ── Capture snapshot TRƯỚC khi ghi đè — dùng cho audit diff ──────────────
+                    final String originalFieldsSnapshot = (doc.getExtractedFields() != null
+                            && !doc.getExtractedFields().isBlank())
+                            ? doc.getExtractedFields()
+                            : "{}";
+
                     return taxApiClient.lookup(request.getTaxCode(), request.getCompanyName())
                             .defaultIfEmpty(new TaxLookupResponse())
                             .flatMap(taxLookup -> upsertCompany(request, taxLookup)
                                     .flatMap(company -> {
 
-                                        // 1. Audit Log Mono
+                                        // 1. Audit Log Mono — truyền originalJson tường minh
                                         Mono<Boolean> auditMono;
                                         try {
                                             String updatedFieldsJson = objectMapper.writeValueAsString(request.getUpdatedFields());
-                                            auditMono = fieldAuditService.logFieldCorrections(doc, updatedFieldsJson)
+                                            auditMono = fieldAuditService
+                                                    .logFieldCorrections(doc, originalFieldsSnapshot, updatedFieldsJson)
                                                     .then(Mono.just(true))
                                                     .defaultIfEmpty(true)
                                                     .onErrorResume(e -> {
@@ -92,6 +107,7 @@ public class DocumentApprovalService {
                                             doc.setCompanyMatchScore(taxLookup.getTaxCode() != null ? 1.0 : 0.8);
                                             doc.setCompanyMatchedBy(taxLookup.getTaxCode() != null ? "TAX_API" : "MANUAL");
                                             doc.setExtractedFields(objectMapper.writeValueAsString(request.getUpdatedFields()));
+                                            doc.setHumanVerified(Boolean.TRUE.equals(request.getHumanVerified()));
                                             // Lấy từ JWT (CurrentUserResolver) — không lấy từ request body
                                             doc.setReviewedBy(reviewer.username());
                                             doc.setReviewedAt(LocalDateTime.now().format(
@@ -100,13 +116,7 @@ public class DocumentApprovalService {
                                             return Mono.error(e);
                                         }
 
-                                        // 2. Python ML Data Collection Mono
-                                        Mono<Boolean> collectMlDataMono = pythonMlClient
-                                                .collectApprovedData(doc.getRawOcrText(), request.getApprovedType())
-                                                .then(Mono.just(true))
-                                                .onErrorResume(e -> Mono.just(false));
-
-                                        // 3. Google Search Suggested Industries Mono
+                                        // 2. Google Search Suggested Industries Mono
                                         Mono<List<CompanyIndustryDetail>> suggestedIndustriesMono = (company.getLegalName() != null && !company.getLegalName().isBlank())
                                                 ? externalTaxSearchService
                                                 .searchCompanyInfoOnline(company.getLegalName(), null)
@@ -123,10 +133,10 @@ public class DocumentApprovalService {
                                                 })
                                                 : Mono.just(List.of()); // Trả về list rỗng nếu không có tên công ty
 
-                                        // Zip song song: audit + ML + industries, rồi mới transition FSM
-                                        return Mono.zip(auditMono, collectMlDataMono, suggestedIndustriesMono)
+                                        // Zip song song: audit + industries, rồi mới transition FSM
+                                        return Mono.zip(auditMono, suggestedIndustriesMono)
                                                 .flatMap(tuple -> {
-                                                    List<CompanyIndustryDetail> suggestedIndustries = tuple.getT3();
+                                                    List<CompanyIndustryDetail> suggestedIndustries = tuple.getT2();
 
                                                     // ── FSM: currentStatus → APPROVED ────────────────
                                                     return stateMachine.transition(documentId, currentStatus, DocumentStatus.APPROVED)
@@ -140,9 +150,45 @@ public class DocumentApprovalService {
                                                                     log.warn("[Approve] documentId={} đã APPROVED rồi (idempotent retry)", documentId);
                                                                 }
 
+                                                                // ── Tính training_eligible ──────────────────────────────
+                                                                // Điều kiện: trustedLabeler + humanVerified + qua validator + !IDEMPOTENT
+                                                                boolean passedValidator = extractionValidatorService.isValid(
+                                                                        request.getApprovedType(),
+                                                                        doc.getExtractedFields(),
+                                                                        doc.getRawOcrText()
+                                                                );
+                                                                boolean eligible = reviewer.trustedLabeler()
+                                                                        && Boolean.TRUE.equals(doc.getHumanVerified())
+                                                                        && passedValidator
+                                                                        && fsmResult != TransitionResult.IDEMPOTENT;
+                                                                doc.setTrainingEligible(eligible);
+                                                                if (eligible) {
+                                                                    log.info("[Approve] documentId={} đủ điều kiện huấn luyện (trustedLabeler=true, humanVerified=true, passedValidator=true)", documentId);
+                                                                }
+
                                                                 // Cập nhật status trên entity và lưu xuống DB
                                                                 doc.setStatus(DocumentStatus.APPROVED.name());
                                                                 return documentRepository.save(doc)
+                                                                        .flatMap(savedDoc -> {
+                                                                            // Xếp vào lô huấn luyện nếu đủ điều kiện
+                                                                            Mono<Void> enrollMono = Boolean.TRUE.equals(savedDoc.getTrainingEligible())
+                                                                                    ? trainingBatchService.enrollDocument(savedDoc).then()
+                                                                                    : Mono.empty();
+
+                                                                            return enrollMono.thenReturn(savedDoc);
+                                                                        })
+                                                                        .flatMap(savedDoc -> {
+                                                                            if ("NAMECARD".equalsIgnoreCase(savedDoc.getDocumentType())
+                                                                                    || "NAMECARD".equalsIgnoreCase(request.getApprovedType())) {
+                                                                                return upsertContactIfNamecard(savedDoc, request, company, reviewer)
+                                                                                        .onErrorResume(e -> {
+                                                                                            log.error("[Approve] Lỗi tạo Contact từ Namecard (không làm hỏng phê duyệt): {}", e.getMessage(), e);
+                                                                                            return Mono.empty();
+                                                                                        })
+                                                                                        .thenReturn(savedDoc);
+                                                                            }
+                                                                            return Mono.just(savedDoc);
+                                                                        })
                                                                         .map(savedDoc -> DocumentApproveResponse.builder()
                                                                                 .documentId(savedDoc.getId())
                                                                                 .status(savedDoc.getStatus())
@@ -169,6 +215,7 @@ public class DocumentApprovalService {
                                             e.getMessage(), e))
                             );
                 });
+
     }
 
 
@@ -274,5 +321,68 @@ public class DocumentApprovalService {
                     .thenReturn(company);
         }
         return Mono.just(company);
+    }
+
+    private Mono<Contact> upsertContactIfNamecard(
+            Document savedDoc,
+            DocumentApproveRequest req,
+            Company company,
+            CurrentUser reviewer) {
+
+        Map<String, Object> fields = req.getUpdatedFields() != null ? req.getUpdatedFields() : Collections.emptyMap();
+
+        String fullName = req.getContactName();
+        if (fullName == null || fullName.isBlank()) {
+            fullName = getStringField(fields, "contact_name", "full_name", "name");
+        }
+        if (fullName == null || fullName.isBlank()) {
+            log.info("[Approve] Không có tên liên hệ để tạo Contact cho documentId={}", savedDoc.getId());
+            return Mono.empty();
+        }
+
+        String title = req.getContactTitle();
+        if (title == null || title.isBlank()) {
+            title = getStringField(fields, "contact_title", "title", "job_title", "position");
+        }
+
+        String phone = getStringField(fields, "phone", "personal_phone");
+        String mobile = getStringField(fields, "mobile", "cellphone");
+        String companyPhone = getStringField(fields, "company_phone", "company_tel", "office_phone", "tel");
+        String email = getStringField(fields, "email", "personal_email", "mail");
+        String companyEmail = getStringField(fields, "company_email", "office_email", "corp_email");
+        String fax = getStringField(fields, "fax", "fax_number", "so_fax");
+        String website = getStringField(fields, "website", "web");
+        String department = getStringField(fields, "department");
+        String address = getStringField(fields, "address");
+
+        Contact newContact = Contact.builder()
+                .ownerCompanyId(reviewer.companyId())
+                .createdBy(reviewer.userId() != null ? reviewer.userId() : 0L)
+                .documentId(savedDoc.getId())
+                .companyId(company != null ? company.getId() : null)
+                .fullName(fullName.trim())
+                .title(title)
+                .department(department)
+                .phone(phone)
+                .mobile(mobile)
+                .email(email)
+                .website(website)
+                .fax(fax)
+                .companyPhone(companyPhone)
+                .companyEmail(companyEmail)
+                .notes(address != null && !address.isBlank() ? "Địa chỉ: " + address : null)
+                .build();
+
+        return contactDeduplicationService.deduplicateAndSave(newContact);
+    }
+
+    private String getStringField(Map<String, Object> map, String... keys) {
+        for (String k : keys) {
+            Object v = map.get(k);
+            if (v != null && !v.toString().isBlank()) {
+                return v.toString().trim();
+            }
+        }
+        return null;
     }
 }

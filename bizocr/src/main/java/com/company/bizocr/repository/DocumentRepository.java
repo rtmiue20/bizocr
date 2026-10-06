@@ -42,7 +42,80 @@ public interface DocumentRepository extends ReactiveCrudRepository<Document, Lon
     @Query("UPDATE documents SET status = :status WHERE id = :id")
     Mono<Integer> updateStatusForced(Long id, String status);
 
+    /**
+     * Cập nhật kết quả AI trích xuất (Ollama / LLM fallback) có điều kiện:
+     * Chỉ ghi khi document CHƯA bị human review (reviewed_by IS NULL)
+     * và trạng thái đang ở các bước phù hợp ('EXTRACTED', 'NEED_REVIEW', 'VALIDATED').
+     */
+    @Modifying
+    @Query("""
+            UPDATE documents
+               SET extracted_fields      = :fields,
+                   predicted_fields_json = :fields,
+                   model_version         = :modelVersion,
+                   contact_name          = COALESCE(:contactName, contact_name),
+                   contact_title         = COALESCE(:contactTitle, contact_title)
+             WHERE id = :id
+               AND reviewed_by IS NULL
+               AND status IN ('EXTRACTED', 'NEED_REVIEW', 'VALIDATED')
+            """)
+    Mono<Integer> updateAiExtractionIfNotReviewed(Long id, String fields, String modelVersion,
+                                                  String contactName, String contactTitle);
 
+    /**
+     * Gắn document vào lô huấn luyện — chỉ khi training_eligible = 1 và chưa có lô.
+     */
+    @Modifying
+    @Query("""
+            UPDATE documents
+               SET training_batch_id = :batchId
+             WHERE id               = :id
+               AND training_eligible = TRUE
+               AND training_batch_id IS NULL
+            """)
+    Mono<Integer> assignToBatchIfEligible(Long id, Long batchId);
+
+    /**
+     * Cập nhật cờ kiểm định dữ liệu và điều kiện huấn luyện.
+     */
+    @Modifying
+    @Query("UPDATE documents SET human_verified = :verified, training_eligible = :eligible WHERE id = :id")
+    Mono<Integer> markTrainingOutcome(Long id, boolean verified, boolean eligible);
+
+    /**
+     * Cập nhật kết quả pipeline vào DB có điều kiện:
+     * Chỉ ghi khi document CHƯA bị human review (reviewed_by IS NULL)
+     * và trạng thái đang ở các bước pipeline tự động.
+     */
+    @Modifying
+    @Query("""
+            UPDATE documents
+               SET document_type         = :documentType,
+                   confidence_score      = :confidenceScore,
+                   matched_by            = :matchedBy,
+                   used_ai_fallback      = :usedAiFallback,
+                   model_version         = :modelVersion,
+                   raw_ocr_text          = :rawOcrText,
+                   ocr_engine            = :ocrEngine,
+                   company_id            = :companyId,
+                   extracted_fields      = :extractedFields,
+                   predicted_fields_json = :extractedFields
+             WHERE id = :id
+               AND reviewed_by IS NULL
+               AND status IN ('PROCESSING','OCR_DONE','CLASSIFIED','EXTRACTED','NEED_REVIEW','VALIDATED')
+            """)
+    Mono<Integer> updatePipelineResultsIfNotReviewed(
+            Long id,
+            String documentType,
+            Double confidenceScore,
+            String matchedBy,
+            Boolean usedAiFallback,
+            String modelVersion,
+            String rawOcrText,
+            String ocrEngine,
+            Long companyId,
+            String extractedFields
+    );
 
     @Query("SELECT * FROM documents WHERE company_id = :companyId AND " +
             "(:status IS NULL OR status = :status) AND " +

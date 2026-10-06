@@ -39,6 +39,7 @@ public class UserService {
                             .phoneNumber(req.getPhoneNumber())
                             .role("REVIEWER") // Hardcode role vì lý do bảo mật
                             .companyId(company.getId())
+                            .trustedLabeler(false)
                             .active(true)
                             .createdAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")))
                             .build();

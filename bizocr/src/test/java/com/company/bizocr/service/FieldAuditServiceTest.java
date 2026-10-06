@@ -106,18 +106,15 @@ class FieldAuditServiceTest {
         }
 
         @Test
-        @DisplayName("JSON cũ và mới giống hệt nhau -> saveAll được gọi với danh sách RỖNG")
+        @DisplayName("JSON cũ và mới giống hệt nhau -> không ghi audit (không gọi repository)")
         void identicalJson_shouldProduceNoAudit() {
             String json = "{\"party_a\":\"Cong ty A\"}";
             Document doc = buildDoc(1L, 10L, null, json);
-            when(auditRepository.saveAll(anyIterable())).thenReturn(Flux.empty());
 
-            StepVerifier.create(service.logFieldCorrections(doc, json))
+            StepVerifier.create(service.logFieldCorrections(doc, json, json))
                     .verifyComplete();
 
-            ArgumentCaptor<Iterable<FieldCorrectionAudit>> captor = ArgumentCaptor.forClass(Iterable.class);
-            verify(auditRepository).saveAll(captor.capture());
-            assertThat(toList(captor.getValue())).isEmpty();
+            verifyNoInteractions(auditRepository);
         }
     }
 

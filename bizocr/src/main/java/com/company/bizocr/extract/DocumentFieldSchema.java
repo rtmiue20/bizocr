@@ -52,8 +52,11 @@ public final class DocumentFieldSchema {
                 f("contact_name", "Họ và tên", "Họ và tên người trên danh thiếp", "name", "fullName", "personInCharge"),
                 f("contact_title", "Chức danh", "Chức danh / Chức vụ (ví dụ: Director, Manager...)", "title", "position", "jobTitle"),
                 f("company_name", "Tên công ty", "Tên công ty / Tổ chức", "company", "issuerName", "organization"),
-                f("phone", "Số điện thoại", null, "phoneNumber", "tel", "mobile", "sdt"),
-                f("email", "Email", "Địa chỉ Email", "mail"),
+                f("phone", "Số ĐT cá nhân", "Số điện thoại di động / cá nhân của người trên danh thiếp", "mobile", "cell", "personalPhone", "sdtCaNhan", "sdt"),
+                f("company_phone", "Số ĐT công ty", "Số điện thoại cơ quan / văn phòng / hotline / tổng đài công ty", "tel", "telephone", "officePhone", "companyPhone", "sdtCongTy"),
+                f("email", "Email cá nhân", "Địa chỉ email cá nhân của người trên danh thiếp", "personalEmail", "mail"),
+                f("company_email", "Email công ty", "Địa chỉ email chung của công ty (info@..., contact@...)", "officeEmail", "corpEmail", "emailCongTy"),
+                f("fax", "Fax", "Số Fax", "faxNumber", "soFax"),
                 f("tax_code", "Mã số thuế", null, "mst", "maSoThue"),
                 f("address", "Địa chỉ", "Địa chỉ cơ quan / Văn phòng"),
                 f("website", "Website", "Trang web", "web", "url")

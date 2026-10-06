@@ -29,32 +29,55 @@ public class FieldAuditService {
     private final CurrentUserResolver currentUserResolver; // Inject resolver mới
 
     /**
-     * So sánh JSON cũ và JSON mới, tự động ghi vết sự khác biệt vào DB
+     * So sánh JSON cũ và JSON mới, tự động ghi vết sự khác biệt vào DB.
+     *
+     * @param doc          Document entity (chỉ dùng để lấy id, ownerCompanyId)
+     * @param originalJson JSON fields TRƯỚC khi human sửa (snapshot gốc — không dùng doc.getExtractedFields()
+     *                     vì caller có thể đã ghi đè trường đó trước khi gọi method này)
+     * @param newJson      JSON fields SAU khi human sửa (updatedFields từ request)
      */
-    public Mono<Void> logFieldCorrections(Document doc, String newExtractedFieldsJson) { // Bỏ tham số reviewer
-        if (newExtractedFieldsJson == null || newExtractedFieldsJson.isBlank()) {
+    public Mono<Void> logFieldCorrections(Document doc, String originalJson, String newJson) {
+        if (newJson == null || newJson.isBlank()) {
+            return Mono.empty();
+        }
+        // Bỏ qua nếu hai chuỗi giống hệt nhau (không có thay đổi)
+        if (newJson.equals(originalJson)) {
             return Mono.empty();
         }
 
         // Lấy thông tin user đang thao tác từ context, sau đó tính diff và lưu DB
         return currentUserResolver.getCurrentUser()
-                .flatMap(currentUser -> Mono.fromCallable(() -> calculateDiff(doc, newExtractedFieldsJson, currentUser)))
+                .flatMap(currentUser -> Mono.fromCallable(() -> calculateDiff(doc, originalJson, newJson, currentUser)))
                 .flatMapMany(auditRepository::saveAll)
                 .doOnNext(audit -> log.info("[Audit] Lưu vết sửa đổi docId={}: field '{}' ('{}' -> '{}') bởi {}",
                         audit.getDocumentId(), audit.getFieldName(), audit.getOriginalValue(), audit.getCorrectedValue(), audit.getReviewedBy()))
                 .then();
     }
 
-    private static final Set<String> METADATA_KEYS = Set.of("field_confidences", "anomaly_analysis");
-
-    // Thay String reviewer bằng object CurrentUser
-    private List<FieldCorrectionAudit> calculateDiff(Document doc, String newJsonStr, CurrentUser currentUser) throws Exception {
-        String oldJsonStr = (doc.getExtractedFields() != null && !doc.getExtractedFields().isBlank())
+    /**
+     * Overload tương thích ngược — lấy originalJson từ doc.getExtractedFields().
+     * Dùng cho code cũ chưa capture snapshot trước khi ghi đè.
+     *
+     * @deprecated Ưu tiên dùng {@link #logFieldCorrections(Document, String, String)} để tránh race condition.
+     */
+    @Deprecated
+    public Mono<Void> logFieldCorrections(Document doc, String newJson) {
+        String originalJson = (doc.getExtractedFields() != null && !doc.getExtractedFields().isBlank())
                 ? doc.getExtractedFields()
                 : "{}";
+        return logFieldCorrections(doc, originalJson, newJson);
+    }
 
-        JsonNode oldNode = objectMapper.readTree(oldJsonStr);
+    private static final Set<String> METADATA_KEYS = Set.of("field_confidences", "anomaly_analysis");
+
+    // Nhận originalJsonStr tường minh — không đọc từ doc.getExtractedFields()
+    // để tránh race condition khi caller đã ghi đè trường đó trước khi gọi method này.
+    private List<FieldCorrectionAudit> calculateDiff(Document doc, String oldJsonStr, String newJsonStr, CurrentUser currentUser) throws Exception {
+        String safeOldJson = (oldJsonStr != null && !oldJsonStr.isBlank()) ? oldJsonStr : "{}";
+
+        JsonNode oldNode = objectMapper.readTree(safeOldJson);
         JsonNode newNode = objectMapper.readTree(newJsonStr);
+
 
         Set<String> allKeys = new HashSet<>();
         oldNode.fieldNames().forEachRemaining(allKeys::add);

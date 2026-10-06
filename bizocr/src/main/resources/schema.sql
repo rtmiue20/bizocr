@@ -88,8 +88,7 @@ CREATE TABLE IF NOT EXISTS documents (
     status               VARCHAR(50)   DEFAULT 'PENDING',       -- PENDING, PROCESSING, COMPLETED, NEED_REVIEW, FAILED
     extracted_fields     JSON,
 
-    -- Generated columns từ extracted_fields (Phase 1 - virtual columns cho query nhanh không parse JSON)
-    -- LƯU Ý: '$.issue_date' cần xác nhận đúng tên key thật trong JSON trước khi chạy trên production
+    -- Generated columns từ extracted_fields
     tax_code             VARCHAR(20)   AS (JSON_UNQUOTE(JSON_EXTRACT(extracted_fields, '$.tax_code'))) STORED,
     issue_date           VARCHAR(20)   AS (JSON_UNQUOTE(JSON_EXTRACT(extracted_fields, '$.issue_date'))) STORED,
     total_amount         VARCHAR(30)   AS (JSON_UNQUOTE(JSON_EXTRACT(extracted_fields, '$.total_amount'))) STORED,
@@ -98,7 +97,7 @@ CREATE TABLE IF NOT EXISTS documents (
     file_path            VARCHAR(255),
 
     raw_ocr_text         LONGTEXT,
-    ocr_engine           VARCHAR(50),                           -- Engine OCR đã xử lý (vd: 'paddleocr'), phục vụ audit/debug khi đổi engine
+    ocr_engine           VARCHAR(50),                           -- Engine OCR đã xử lý
     matched_by           VARCHAR(50),                           -- TEMPLATE_MATCHING, AI_FALLBACK, ...
     used_ai_fallback     TINYINT(1)    NOT NULL DEFAULT 0,
     model_version        VARCHAR(100),
@@ -106,23 +105,21 @@ CREATE TABLE IF NOT EXISTS documents (
     reviewed_at          VARCHAR(50),
     reviewed_by          VARCHAR(100),
 
-    -- FIX: tách riêng "công ty SỞ HỮU document" (tenant, dùng để check quyền IDOR ở
-    -- DocumentController) khỏi "company_id" bên dưới (công ty được OCR NHẬN DIỆN trong
-    -- nội dung chứng từ, dùng cho CompanyResolverService/Multi-Signal Identification).
-    -- Trước đây dùng chung 1 cột company_id cho cả 2 mục đích -> PipelineOrchestrator ghi
-    -- đè company_id bằng công ty OCR nhận diện, làm mất giá trị tenant đã gán lúc upload,
-    -- khiến findByIdAndCompanyId(id, jwtCompanyId) luôn 404 sau khi document được xử lý xong.
-    -- owner_company_id được gán 1 LẦN DUY NHẤT lúc upload (DocumentController.uploadDocument)
-    -- và KHÔNG được PipelineOrchestrator đụng vào.
-    owner_company_id     BIGINT        NOT NULL DEFAULT 0,        -- Tenant sở hữu document - dùng cho mọi check IDOR
+    owner_company_id     BIGINT        NOT NULL DEFAULT 0,        -- Tenant sở hữu document
 
--- Liên kết Multi-Signal Identification tới companies (công ty được OCR NHẬN DIỆN trong nội dung)
+-- Liên kết Multi-Signal Identification
     company_id           BIGINT,
-    company_match_score  DOUBLE,                                -- Điểm tương đồng khi match (0.0–1.0)
-    company_matched_by   VARCHAR(50),                            -- VIETQR_DIRECT | DB_MATCH | WEB_SEARCH_VIETQR | OCR_ONLY
+    company_match_score  DOUBLE,
+    company_matched_by   VARCHAR(50),
 
     contact_name          VARCHAR(255),
     contact_title         VARCHAR(255),
+
+    -- ML / Continuous Learning fields (Từ Migration V2)
+    predicted_fields_json JSON         COMMENT 'Snapshot dự đoán của model tại thời điểm bóc tách (chưa bị human ghi đè)',
+    human_verified        TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1 khi kế toán tin tưởng xác nhận đây là dữ liệu đúng',
+    training_eligible     TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1 khi đủ điều kiện đưa vào lô huấn luyện',
+    training_batch_id     BIGINT                          COMMENT 'FK tới training_batches.id khi document đã được gom vào lô',
 
     PRIMARY KEY (id),
     KEY idx_documents_owner_company_id (owner_company_id),
@@ -130,6 +127,8 @@ CREATE TABLE IF NOT EXISTS documents (
     KEY idx_documents_tax_code (tax_code),
     KEY idx_documents_issue_date (issue_date),
     KEY idx_documents_total_amount (total_amount),
+    -- Chỉ mục cho vòng lặp huấn luyện (Từ Migration V3)
+    KEY idx_documents_training (training_eligible, training_batch_id),
     CONSTRAINT fk_documents_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL
     ) ENGINE=InnoDB;
 
@@ -137,10 +136,10 @@ CREATE TABLE IF NOT EXISTS documents (
 -- 6. FIELD_CORRECTION_AUDITS — audit log khi kế toán sửa field
 -- =========================================================
 CREATE TABLE IF NOT EXISTS field_correction_audits (
-    id                BIGINT        NOT NULL AUTO_INCREMENT,
-    document_id       BIGINT        NOT NULL,
-    company_id        BIGINT        NOT NULL,
-    field_name        VARCHAR(100)  NOT NULL,
+                                                       id                BIGINT        NOT NULL AUTO_INCREMENT,
+                                                       document_id       BIGINT        NOT NULL,
+                                                       company_id        BIGINT        NOT NULL,
+                                                       field_name        VARCHAR(100)  NOT NULL,
     original_value    TEXT,
     corrected_value   TEXT,
     reviewed_by       VARCHAR(100)  NOT NULL,
@@ -157,8 +156,8 @@ CREATE TABLE IF NOT EXISTS field_correction_audits (
 -- 7. TEMPLATE_CONFIG — cấu hình loại chứng từ (động, không hardcode)
 -- =========================================================
 CREATE TABLE IF NOT EXISTS template_config (
-    id              BIGINT       NOT NULL AUTO_INCREMENT,
-    doc_type_code   VARCHAR(100) NOT NULL,
+                                               id              BIGINT       NOT NULL AUTO_INCREMENT,
+                                               doc_type_code   VARCHAR(100) NOT NULL,
     display_name    VARCHAR(255) NOT NULL,
     anchors         TEXT         NOT NULL,   -- từ khóa định danh, cách nhau bởi dấu phẩy
     status          VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
@@ -174,8 +173,8 @@ CREATE TABLE IF NOT EXISTS template_config (
 -- 8. TEMPLATE_FIELD_CONFIG — cấu hình field theo từng loại chứng từ
 -- =========================================================
 CREATE TABLE IF NOT EXISTS template_field_config (
-    id              BIGINT        NOT NULL AUTO_INCREMENT,
-    doc_type_code   VARCHAR(100)  NOT NULL,
+                                                     id              BIGINT        NOT NULL AUTO_INCREMENT,
+                                                     doc_type_code   VARCHAR(100)  NOT NULL,
     field_key       VARCHAR(100)  NOT NULL,
     ui_label        VARCHAR(255)  NOT NULL,
     data_type       VARCHAR(20)   NOT NULL,   -- TEXT / NUMBER / DATE
@@ -189,22 +188,113 @@ CREATE TABLE IF NOT EXISTS template_field_config (
     CONSTRAINT fk_field_config_doc_type
     FOREIGN KEY (doc_type_code) REFERENCES template_config (doc_type_code)
     ON UPDATE CASCADE ON DELETE CASCADE
-    ) ENGINE=InnoDB;
+) ENGINE=InnoDB;
 
+-- =========================================================
+-- 9. USERS — thông tin tài khoản người dùng
+-- =========================================================
 CREATE TABLE IF NOT EXISTS users (
-    id             BIGINT        NOT NULL AUTO_INCREMENT,
-    username       VARCHAR(100)  NOT NULL,
-    password_hash  VARCHAR(255)  NOT NULL,
-    email          VARCHAR(255)  NOT NULL,
-    phone_number   VARCHAR(50),
-    role           VARCHAR(50)   NOT NULL DEFAULT 'REVIEWER',
-    company_id     BIGINT        NOT NULL,
-    active         TINYINT(1)    NOT NULL DEFAULT 1,
-    created_at     VARCHAR(100),
+    id               BIGINT        NOT NULL AUTO_INCREMENT,
+    username         VARCHAR(100)  NOT NULL,
+    password_hash    VARCHAR(255)  NOT NULL,
+    email            VARCHAR(255)  NOT NULL,
+    phone_number     VARCHAR(50),
+    role             VARCHAR(50)   NOT NULL DEFAULT 'REVIEWER',
+    company_id       BIGINT        NOT NULL,
+    active           TINYINT(1)    NOT NULL DEFAULT 1,
+    trusted_labeler  TINYINT(1)    NOT NULL DEFAULT 0 COMMENT 'Chỉ bật tay cho tài khoản kế toán đáng tin cậy; ảnh hưởng trực tiếp đến training_eligible',
+    created_at       VARCHAR(100),
 
     PRIMARY KEY (id),
     UNIQUE KEY uk_users_username (username),
     UNIQUE KEY uk_users_email (email),
     KEY idx_users_company_id (company_id),
     CONSTRAINT fk_users_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB;
+) ENGINE=InnoDB;
+
+-- =========================================================
+-- 10. TRAINING_BATCHES — Lô huấn luyện vòng học liên tục
+-- =========================================================
+CREATE TABLE IF NOT EXISTS training_batches (
+    id                   BIGINT       NOT NULL AUTO_INCREMENT,
+    status               VARCHAR(20)  NOT NULL DEFAULT 'OPEN'  COMMENT 'OPEN | READY | RUNNING | PROMOTED | REJECTED',
+    size                 INT          NOT NULL DEFAULT 0        COMMENT 'Số document đã gom vào lô',
+    model_version_before VARCHAR(100)                          COMMENT 'Phiên bản model trước khi huấn luyện',
+    model_version_after  VARCHAR(100)                          COMMENT 'Phiên bản model sau khi huấn luyện thành công',
+    metrics_json         JSON                                  COMMENT 'Kết quả đánh giá từ Python (accuracy, f1, ...)',
+    created_at           TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    updated_at           TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    KEY idx_training_batches_status (status)
+) ENGINE=InnoDB COMMENT='Quản lý lô huấn luyện vòng học liên tục';
+
+-- =========================================================
+-- 11. CONTACTS — danh bạ người liên hệ từ namecard
+-- =========================================================
+CREATE TABLE IF NOT EXISTS contacts (
+    id                    BIGINT        NOT NULL AUTO_INCREMENT,
+    owner_company_id      BIGINT        NOT NULL,           -- Tenant sở hữu (từ JWT)
+    created_by            BIGINT        NOT NULL DEFAULT 0, -- user_id tạo bản ghi
+    document_id           BIGINT,                           -- Document namecard nguồn gốc
+    company_id            BIGINT,                           -- Công ty của người này
+
+    -- Thông tin cá nhân
+    full_name             VARCHAR(255)  NOT NULL,
+    normalized_name       VARCHAR(255)  NOT NULL,           -- bỏ dấu, uppercase, dùng FULLTEXT search
+    title                 VARCHAR(255),                     -- chức vụ
+    department            VARCHAR(255),
+    phone                 VARCHAR(20),                      -- chuẩn hóa 0xxxxxxxxx
+    mobile                VARCHAR(20),
+    email                 VARCHAR(255),
+    website               VARCHAR(255),
+    fax                   VARCHAR(50),
+    company_phone         VARCHAR(50),
+    company_email         VARCHAR(255),
+
+    -- CRM nhẹ
+    met_at                VARCHAR(500),                     -- gặp ở đâu (VD: "Hội thảo Tech 2026")
+    met_date              DATE,
+    notes                 TEXT,
+    tags                  VARCHAR(500),                     -- "khách hàng,VIP,tech" phân cách dấu phẩy
+    last_contacted        DATETIME,
+
+    -- Dedup: OK | POSSIBLE_DUPLICATE
+    dedup_status          VARCHAR(20)   NOT NULL DEFAULT 'OK',
+    possible_duplicate_id BIGINT        NULL COMMENT 'FK tới contacts.id khi bị cờ nghi trùng',
+
+    created_at            DATETIME      DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    KEY idx_contacts_owner          (owner_company_id),
+    KEY idx_contacts_email          (email),
+    KEY idx_contacts_phone          (phone),
+    KEY idx_contacts_company        (company_id),
+    KEY idx_contacts_dedup          (dedup_status),
+    FULLTEXT KEY ft_contacts_name   (normalized_name),
+    CONSTRAINT fk_contacts_document      FOREIGN KEY (document_id)    REFERENCES documents(id)  ON DELETE SET NULL,
+    CONSTRAINT fk_contacts_company       FOREIGN KEY (company_id)     REFERENCES companies(id)  ON DELETE SET NULL,
+    CONSTRAINT fk_contacts_owner_company FOREIGN KEY (owner_company_id) REFERENCES companies(id) ON DELETE CASCADE
+) ENGINE=InnoDB COMMENT='Danh bạ người liên hệ số hóa từ namecard vật lý';
+
+-- =========================================================
+-- 12. DOCUMENT_IMAGES — ảnh mặt trước/sau của namecard
+--     Tách ra khỏi documents để không làm thay đổi pipeline
+-- =========================================================
+CREATE TABLE IF NOT EXISTS document_images (
+    id            BIGINT        NOT NULL AUTO_INCREMENT,
+    document_id   BIGINT        NOT NULL,
+    side          VARCHAR(10)   NOT NULL COMMENT 'FRONT | BACK',
+    storage_key   VARCHAR(500)  NOT NULL COMMENT 'Đường dẫn tương đối, không tuyệt đối',
+    thumb_key     VARCHAR(500)           COMMENT 'Thumbnail key (null nếu Python lỗi → UI dùng CSS fallback)',
+    sha256        VARCHAR(64)            COMMENT 'Hash ảnh để dedup upload trùng',
+    ocr_status    VARCHAR(20)   NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING | DONE | SKIPPED | FAILED',
+    raw_text_back LONGTEXT               COMMENT 'OCR text riêng cho mặt sau (side=BACK), fill-in-blank',
+    uploaded_at   DATETIME      DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_doc_side    (document_id, side),
+    KEY idx_doc_images_doc    (document_id),
+    CONSTRAINT fk_doc_images_document FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+) ENGINE=InnoDB COMMENT='Ảnh mặt trước/sau namecard, hỗ trợ thumbnail và OCR mặt sau nhẹ';
