@@ -4,7 +4,7 @@ import AuthCard from './AuthCard'
 import './login.css'
 
 export default function Login({onDone}: { onDone: () => void }) {
-    const [on, setOn] = useState(true)
+    const [on, setOn] = useState(false)
     const toggle = () => setOn((v) => !v)
 
     return (

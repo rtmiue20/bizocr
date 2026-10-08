@@ -43,6 +43,10 @@ logging:
     org.springframework.r2dbc: DEBUG   # Xem log câu SQL chạy ngầm — tắt ở production
 
 bizocr:
+  security:
+    internal-token: ${INTERNAL_TOKEN:dev-internal-token}
+    admin-token: ${ADMIN_TOKEN:dev-admin-token}
+
   python-service:
     url: ${PYTHON_SERVICE_URL:http://localhost:8000}
 

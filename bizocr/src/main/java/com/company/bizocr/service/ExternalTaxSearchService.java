@@ -18,11 +18,20 @@ import java.util.regex.Pattern;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ExternalTaxSearchService {
 
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    private final String internalToken;
+
+    public ExternalTaxSearchService(
+            WebClient webClient,
+            ObjectMapper objectMapper,
+            @Value("${bizocr.security.internal-token:${INTERNAL_TOKEN:dev-internal-token}}") String internalToken) {
+        this.webClient = webClient;
+        this.objectMapper = objectMapper;
+        this.internalToken = internalToken;
+    }
 
     /**
      * URL của Python microservice sử dụng DuckDuckGo DDGS.
@@ -95,6 +104,7 @@ public class ExternalTaxSearchService {
         return webClient
                 .post()
                 .uri(buildDuckDuckGoEndpoint())
+                .header("X-Internal-Token", internalToken)
                 .bodyValue(requestBody)
                 .retrieve()
                 .onStatus(

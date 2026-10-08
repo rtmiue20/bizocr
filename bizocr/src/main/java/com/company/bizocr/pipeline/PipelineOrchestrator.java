@@ -61,6 +61,7 @@ public class PipelineOrchestrator {
     private final ObjectMapper objectMapper;
     private final DocumentStateMachine stateMachine;
     private final OllamaQueueService ollamaQueueService;
+    private final com.company.bizocr.score.CompletenessScoreService completenessScoreService;
 
     // =========================================================================
     // Public entry points
@@ -95,6 +96,9 @@ public class PipelineOrchestrator {
                     String rawText = ocrResult.getRawText();
                     record.setRawOcrText(rawText);
                     record.setOcrEngine(ocrResult.getEngine());
+
+                    final Double contourAreaRatio = ocrResult.getContourAreaRatio();
+                    final Double avgOcrConfidence = ocrResult.getConfidence();
 
                     if (rawText == null || rawText.isBlank()) {
                         return forceFailAndError(record, "OCR trả về text rỗng");
@@ -155,7 +159,42 @@ public class PipelineOrchestrator {
                                                                 return extractMono;
                                                             })
                                                             .flatMap(extractedFields -> {
-                                                                record.setExtractedFields(extractedFields);
+                                                                // Tính Completeness Score & nhúng _meta vào extractedFields JSON
+                                                                String enrichedFields = extractedFields;
+                                                                try {
+                                                                    com.company.bizocr.score.CompletenessScoreResult csResult =
+                                                                            completenessScoreService.compute(
+                                                                                    record.getDocumentType(),
+                                                                                    extractedFields,
+                                                                                    contourAreaRatio,
+                                                                                    avgOcrConfidence
+                                                                            );
+
+                                                                    com.fasterxml.jackson.databind.node.ObjectNode root =
+                                                                            (extractedFields != null && !extractedFields.isBlank())
+                                                                                    ? (com.fasterxml.jackson.databind.node.ObjectNode) objectMapper.readTree(extractedFields)
+                                                                                    : objectMapper.createObjectNode();
+
+                                                                    com.fasterxml.jackson.databind.node.ObjectNode meta = objectMapper.createObjectNode();
+                                                                    meta.put("completeness_score", csResult.score());
+                                                                    meta.put("completeness_grade", csResult.grade());
+                                                                    meta.put("completeness_label", csResult.label());
+                                                                    meta.put("mandatory_fields_ratio", csResult.mandatoryFieldsRatio());
+                                                                    meta.put("contour_area_ratio", csResult.contourAreaRatio());
+                                                                    meta.put("avg_ocr_confidence", csResult.avgOcrConfidence());
+                                                                    meta.put("mandatory_filled", csResult.mandatoryFilled());
+                                                                    meta.put("mandatory_total", csResult.mandatoryTotal());
+                                                                    meta.put("confirm_prompt", completenessScoreService.buildConfirmPrompt(csResult));
+
+                                                                    root.set("_meta", meta);
+                                                                    enrichedFields = objectMapper.writeValueAsString(root);
+                                                                    log.info("[Pipeline] documentId={} completeness={} grade={}",
+                                                                            record.getId(), csResult.score(), csResult.grade());
+                                                                } catch (Exception e) {
+                                                                    log.warn("[Pipeline] Không thể tính CompletenessScore: {}", e.getMessage());
+                                                                }
+
+                                                                record.setExtractedFields(enrichedFields);
 
                                                                 return stateMachine.transition(record.getId(),
                                                                                 DocumentStatus.CLASSIFIED,

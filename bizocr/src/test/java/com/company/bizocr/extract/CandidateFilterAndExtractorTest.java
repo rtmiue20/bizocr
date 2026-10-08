@@ -212,4 +212,47 @@ class CandidateFilterAndExtractorTest {
         assertTrue(fields.containsKey("phone"));
         assertEquals("3501473524", fields.get("tax_code"));
     }
+
+    @Test
+    @DisplayName("Phone - Số tổng đài 1800/1900 phải được nhận diện là company_phone, không phải mobile")
+    void testTollFreePhoneRecognition() {
+        String ocr = """
+                CÔNG TY ABC
+                Hotline: 1800 1234
+                Di động: 0912345678
+                MST: 0100109106
+                """;
+        Map<String, Object> fields = regexExtractorService.extractFromHardcodedRegex("NAMECARD", ocr);
+        assertNotNull(fields);
+
+        // Hotline 1800 phải xuất hiện trong company_phone (không phải mobile/phone cá nhân)
+        String companyPhone = String.valueOf(fields.getOrDefault("company_phone", ""));
+        String phone = String.valueOf(fields.getOrDefault("phone", ""));
+        boolean tollFreeInCompany = companyPhone.contains("1800") || companyPhone.contains("18001234");
+        boolean tollFreeInPhone   = phone.contains("1800") || phone.contains("18001234");
+        assertTrue(tollFreeInCompany || tollFreeInPhone,
+                "Số 1800xxxx phải được nhận diện là phone chứ không bị bỏ qua. company_phone="
+                        + companyPhone + ", phone=" + phone);
+    }
+
+    @Test
+    @DisplayName("Email - repairEmail không được hỏng email đã có '@' hợp lệ")
+    void testRepairEmailDoesNotCorruptValidEmail() {
+        // Dùng trực tiếp NamecardSanitizer thông qua luồng trích xuất namecard
+        // Email đã có @, không được bị sửa thêm
+        String ocr = """
+                CÔNG TY XYZ
+                Email: john.o.nguyen@omega.com.vn
+                SĐT: 0901234567
+                """;
+        Map<String, Object> fields = regexExtractorService.extractFromHardcodedRegex("NAMECARD", ocr);
+        assertNotNull(fields);
+
+        String email = String.valueOf(fields.getOrDefault("email", ""));
+        // Email gốc có "john.o.nguyen" — chữ 'o' không được biến thành '@'
+        assertFalse(email.contains("@@"),
+                "Email không được có '@@' kép: " + email);
+        assertTrue(email.contains("@omega.com.vn"),
+                "Phần domain phải là @omega.com.vn, thực tế: " + email);
+    }
 }

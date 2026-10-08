@@ -21,12 +21,73 @@ export interface Doc {
     reviewedAt?: string | null
 }
 
+export interface DocumentDetailResponse {
+    documentId: number
+    fileName: string
+    documentType?: string | null
+    status: string
+    matchedBy?: string | null
+    confidenceScore?: number | null
+    receivedAt?: string | null
+    reviewedBy?: string | null
+    reviewedAt?: string | null
+    ocrEngine?: string | null
+    extractedFields?: string | null
+    completenessScore?: number | null
+    completenessGrade?: string | null
+    completenessLabel?: string | null
+    mandatoryFieldsRatio?: number | null
+    contourAreaRatio?: number | null
+    avgOcrConfidence?: number | null
+    mandatoryFilled?: number | null
+    mandatoryTotal?: number | null
+    confirmPrompt?: string | null
+}
+
 export interface DocPage {
     items: Doc[]
     totalElements: number
     page: number
     size: number
     totalPages: number
+}
+
+export interface CardItemResponse {
+    id: number
+    documentId?: number | null
+    companyId?: number | null
+    fullName: string
+    title?: string | null
+    department?: string | null
+    companyName?: string | null
+    taxCode?: string | null
+    phone?: string | null
+    mobile?: string | null
+    email?: string | null
+    companyPhone?: string | null
+    companyEmail?: string | null
+    fax?: string | null
+    website?: string | null
+    address?: string | null
+    industry?: string | null
+    imageUrl?: string | null
+    thumbnailUrl?: string | null
+    isNew?: boolean
+    approvedAt?: string | null
+    createdAt?: string | null
+}
+
+export interface CardPageResponse {
+    items: CardItemResponse[]
+    total: number
+    page: number
+    pageSize: number
+    totalPages: number
+}
+
+export interface IndustryCountResponse {
+    industry: string
+    count: number
 }
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -52,7 +113,11 @@ export interface Contact {
     phone?: string
     mobile?: string
     email?: string
+    companyPhone?: string
+    companyEmail?: string
+    fax?: string
     website?: string
+    industry?: string
     metAt?: string
     metDate?: string
     notes?: string
@@ -76,7 +141,11 @@ export interface ContactSummary {
     phone?: string
     mobile?: string
     email?: string
+    companyPhone?: string
+    companyEmail?: string
+    fax?: string
     website?: string
+    industry?: string
     tags?: string
     metAt?: string
     lastContacted?: string

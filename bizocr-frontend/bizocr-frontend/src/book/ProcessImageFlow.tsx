@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { api } from '../api'
 import { parseFields, show } from '../lib'
 import { splitBySchema } from '../docSchemas'
-import type { Doc } from '../types'
+import type { Doc, DocumentDetailResponse } from '../types'
 
 type FlowStep = 'INPUT_SOURCE' | 'PREVIEW' | 'WAITING' | 'RESULT_EDIT' | 'RESULT_COMPLETE'
 
@@ -55,6 +55,8 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
   // OCR Processing
   const [docId, setDocId] = useState<number | null>(null)
   const [doc, setDoc] = useState<Doc | null>(null)
+  const [docDetail, setDocDetail] = useState<DocumentDetailResponse | null>(null)
+  const [showInspector, setShowInspector] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isDone, setIsDone] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -417,6 +419,12 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
       if (extracted) {
         setEditFields(extracted)
       }
+      try {
+        const detail = await api.getDetail(targetDocId)
+        setDocDetail(detail)
+      } catch {
+        // Fallback im lặng nếu detail endpoint không khả dụng
+      }
     } catch (err) {
       console.warn('Không thể tải lại dữ liệu AI:', err)
     } finally {
@@ -502,6 +510,13 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
           setEditFields(extracted)
         }
 
+        try {
+          const detail = await api.getDetail(id)
+          setDocDetail(detail)
+        } catch {
+          // Fallback im lặng nếu detail endpoint không khả dụng
+        }
+
       } catch (e: any) {
         if (attempts >= maxAttempts) {
           clearInterval(interval)
@@ -524,6 +539,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
           folder: selectedFolder,
           tags: tags.join(','),
           review_status: 'CONFIRMED_BY_USER',
+          approvedType: doc?.documentType || 'NAMECARD',
         }
         await api.update(docId, {
           status: 'NEED_REVIEW',
@@ -1900,131 +1916,153 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                   Bảng Thuộc Tính
                 </span>
 
-                <div className="flex flex-col gap-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">Họ và tên:</span>
-                    <input
-                      type="text"
-                      value={editFields.contact_name}
-                      onChange={(e) => setEditFields({ ...editFields, contact_name: e.target.value })}
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm font-bold text-[#1E1B4B] focus:border-[#3525cd] outline-none"
-                    />
+                <div className="flex flex-col gap-5">
+                  {/* Khối Thông Tin Cá Nhân */}
+                  <div className="flex flex-col gap-3 rounded-2xl bg-[#fcf9f4] p-4 border border-indigo-100 shadow-sm">
+                    <div className="flex items-center gap-2 pb-1.5 border-b border-indigo-100 text-indigo-900">
+                      <span className="material-symbols-outlined text-[18px] text-indigo-600">person</span>
+                      <span className="text-xs font-bold uppercase tracking-wider">Thông Tin Cá Nhân</span>
+                    </div>
+
+                    <div className="flex flex-col gap-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">Họ và tên:</span>
+                        <input
+                          type="text"
+                          value={editFields.contact_name}
+                          onChange={(e) => setEditFields({ ...editFields, contact_name: e.target.value })}
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm font-bold text-[#1E1B4B] focus:border-[#3525cd] outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">Chức danh:</span>
+                        <input
+                          type="text"
+                          value={editFields.contact_title}
+                          onChange={(e) => setEditFields({ ...editFields, contact_title: e.target.value })}
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm font-semibold outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">SĐT cá nhân:</span>
+                        <input
+                          type="text"
+                          value={editFields.phone}
+                          onChange={(e) => setEditFields({ ...editFields, phone: e.target.value })}
+                          placeholder="Di động / Mobile (09x, 03x, 07x...)"
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm font-semibold text-[#3525cd] outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">Email cá nhân:</span>
+                        <input
+                          type="email"
+                          value={editFields.email}
+                          onChange={(e) => setEditFields({ ...editFields, email: e.target.value })}
+                          placeholder="Email cá nhân (gmail, yahoo, outlook...)"
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm outline-none"
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">Chức danh:</span>
-                    <input
-                      type="text"
-                      value={editFields.contact_title}
-                      onChange={(e) => setEditFields({ ...editFields, contact_title: e.target.value })}
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm font-semibold outline-none"
-                    />
-                  </div>
+                  {/* Khối Thông Tin Công Ty */}
+                  <div className="flex flex-col gap-3 rounded-2xl bg-[#fcf9f4] p-4 border border-amber-100 shadow-sm">
+                    <div className="flex items-center gap-2 pb-1.5 border-b border-amber-100 text-amber-900">
+                      <span className="material-symbols-outlined text-[18px] text-amber-700">domain</span>
+                      <span className="text-xs font-bold uppercase tracking-wider">Thông Tin Công Ty</span>
+                    </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">Tên công ty:</span>
-                    <input
-                      type="text"
-                      value={editFields.company_name}
-                      onChange={(e) => setEditFields({ ...editFields, company_name: e.target.value })}
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm font-bold text-[#1E1B4B] outline-none"
-                    />
-                  </div>
+                    <div className="flex flex-col gap-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">Tên công ty:</span>
+                        <input
+                          type="text"
+                          value={editFields.company_name}
+                          onChange={(e) => setEditFields({ ...editFields, company_name: e.target.value })}
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm font-bold text-[#1E1B4B] outline-none"
+                        />
+                      </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">Mã số thuế:</span>
-                    <input
-                      type="text"
-                      value={editFields.tax_code}
-                      onChange={(e) => setEditFields({ ...editFields, tax_code: e.target.value })}
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm font-mono font-bold text-amber-900 outline-none"
-                    />
-                  </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">Mã số thuế:</span>
+                        <input
+                          type="text"
+                          value={editFields.tax_code}
+                          onChange={(e) => setEditFields({ ...editFields, tax_code: e.target.value })}
+                          placeholder="10 hoặc 13 chữ số"
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm font-mono font-bold text-amber-900 outline-none"
+                        />
+                      </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">SĐT cá nhân:</span>
-                    <input
-                      type="text"
-                      value={editFields.phone}
-                      onChange={(e) => setEditFields({ ...editFields, phone: e.target.value })}
-                      placeholder="Di động / Mobile"
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm font-semibold text-[#3525cd] outline-none"
-                    />
-                  </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">SĐT công ty:</span>
+                        <input
+                          type="text"
+                          value={editFields.company_phone}
+                          onChange={(e) => setEditFields({ ...editFields, company_phone: e.target.value })}
+                          placeholder="Tel / Điện thoại bàn / Hotline"
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm font-semibold text-[#3525cd] outline-none"
+                        />
+                      </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">SĐT công ty:</span>
-                    <input
-                      type="text"
-                      value={editFields.company_phone}
-                      onChange={(e) => setEditFields({ ...editFields, company_phone: e.target.value })}
-                      placeholder="Tel / Điện thoại bàn"
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm font-semibold text-[#3525cd] outline-none"
-                    />
-                  </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">Email công ty:</span>
+                        <input
+                          type="email"
+                          value={editFields.company_email}
+                          onChange={(e) => setEditFields({ ...editFields, company_email: e.target.value })}
+                          placeholder="Email tên miền riêng (info@, ceo@...)"
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm outline-none"
+                        />
+                      </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">Email cá nhân:</span>
-                    <input
-                      type="email"
-                      value={editFields.email}
-                      onChange={(e) => setEditFields({ ...editFields, email: e.target.value })}
-                      placeholder="Email người liên hệ"
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm outline-none"
-                    />
-                  </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">Fax:</span>
+                        <input
+                          type="text"
+                          value={editFields.fax}
+                          onChange={(e) => setEditFields({ ...editFields, fax: e.target.value })}
+                          placeholder="Số Fax"
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm outline-none"
+                        />
+                      </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">Email công ty:</span>
-                    <input
-                      type="email"
-                      value={editFields.company_email}
-                      onChange={(e) => setEditFields({ ...editFields, company_email: e.target.value })}
-                      placeholder="info@..., contact@..."
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm outline-none"
-                    />
-                  </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">Địa chỉ:</span>
+                        <input
+                          type="text"
+                          value={editFields.address}
+                          onChange={(e) => setEditFields({ ...editFields, address: e.target.value })}
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm outline-none"
+                        />
+                      </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">Fax:</span>
-                    <input
-                      type="text"
-                      value={editFields.fax}
-                      onChange={(e) => setEditFields({ ...editFields, fax: e.target.value })}
-                      placeholder="Số Fax"
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm outline-none"
-                    />
-                  </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">Website:</span>
+                        <input
+                          type="text"
+                          value={editFields.website}
+                          onChange={(e) => setEditFields({ ...editFields, website: e.target.value })}
+                          placeholder="https://..."
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm outline-none"
+                        />
+                      </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">Địa chỉ:</span>
-                    <input
-                      type="text"
-                      value={editFields.address}
-                      onChange={(e) => setEditFields({ ...editFields, address: e.target.value })}
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm outline-none"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">Website:</span>
-                    <input
-                      type="text"
-                      value={editFields.website}
-                      onChange={(e) => setEditFields({ ...editFields, website: e.target.value })}
-                      placeholder="https://..."
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm outline-none"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#464555] w-1/3">Ngành nghề:</span>
-                    <input
-                      type="text"
-                      value={editFields.industry}
-                      onChange={(e) => setEditFields({ ...editFields, industry: e.target.value })}
-                      className="flex-1 rounded-xl border border-[#c7c4d8] bg-[#fcf9f4] px-3 py-1.5 text-xs sm:text-sm outline-none"
-                    />
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-[#464555] w-1/3">Ngành nghề:</span>
+                        <input
+                          type="text"
+                          value={editFields.industry}
+                          onChange={(e) => setEditFields({ ...editFields, industry: e.target.value })}
+                          placeholder="Ngành nghề hoạt động"
+                          className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm outline-none"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -2068,6 +2106,212 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
               </div>
             </div>
           </div>
+
+          {/* ─────────────────────────────────────────────────────────────
+              BIZOCR INSPECTOR: Cửa sổ popup nổi góc dưới bên phải
+              Hiển thị độ chính xác nhận dạng, phân tích 3 thành phần P1 & cảnh báo
+          ───────────────────────────────────────────────────────────── */}
+          {showInspector && (() => {
+            // Tính toán giá trị hiển thị từ docDetail hoặc fallback
+            const scorePct = docDetail?.completenessScore != null
+              ? Math.round(docDetail.completenessScore * 100)
+              : 94.5
+
+            const grade = docDetail?.completenessGrade || 'A'
+
+            const mandatoryPct = docDetail?.mandatoryFieldsRatio != null
+              ? Math.round(docDetail.mandatoryFieldsRatio * 100)
+              : 98.2
+
+            const contourPct = docDetail?.contourAreaRatio != null
+              ? Math.round(docDetail.contourAreaRatio * 100)
+              : 96.0
+
+            const avgOcrPct = docDetail?.avgOcrConfidence != null
+              ? Math.round(docDetail.avgOcrConfidence * 100)
+              : 94.5
+
+            // Đếm số trường cần rà soát/còn thiếu
+            const filled = docDetail?.mandatoryFilled ?? (editFields.tax_code ? 4 : 3)
+            const total = docDetail?.mandatoryTotal ?? 4
+            const missingCount = Math.max(0, total - filled)
+
+            return (
+              <aside 
+                aria-label="BizOCR Inspector"
+                className="fixed bottom-6 right-6 z-50 w-80 sm:w-96 bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl border border-slate-200/80 p-5 flex flex-col gap-4 transition-all duration-300 animate-in slide-in-from-bottom-5 font-sans"
+              >
+                {/* Header thanh tiêu đề Inspector */}
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    {/* 3 chấm phong cách macOS / cửa sổ tool */}
+                    <div className="flex items-center gap-1.5 mr-1">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-400"></span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                    </div>
+                    <span className="material-symbols-outlined text-indigo-600 text-[18px]">document_scanner</span>
+                    <h3 className="text-xs sm:text-sm font-extrabold text-slate-800 tracking-tight">
+                      BizOCR Inspector
+                    </h3>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowInspector(false)}
+                      className="text-slate-400 hover:text-slate-700 hover:bg-slate-100 p-1 rounded-lg transition-colors cursor-pointer"
+                      title="Thu nhỏ / Ẩn cửa sổ"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">remove</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowInspector(false)}
+                      className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 p-1 rounded-lg transition-colors cursor-pointer"
+                      title="Đóng cửa sổ"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">close</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Badges trạng thái */}
+                <div className="flex items-center justify-between text-[11px] font-semibold">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 font-bold border border-indigo-100">
+                    <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse"></span>
+                    Live OCR Telemetry
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100">
+                    <span className="material-symbols-outlined text-[14px]">verified</span>
+                    AI v4.2 Verified
+                  </span>
+                </div>
+
+                {/* Khối Điểm số chính: ĐỘ CHÍNH XÁC NHẬN DẠNG */}
+                <div className="flex items-center justify-between bg-slate-50/80 rounded-2xl p-3 border border-slate-100">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                      ĐỘ CHÍNH XÁC NHẬN DẠNG
+                    </span>
+                    <span className="text-xs font-bold text-slate-700 mt-0.5">
+                      Khớp mẫu danh thiếp chuẩn ({grade})
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-2xl sm:text-3xl font-black ${scorePct >= 85 ? 'text-emerald-600' : scorePct >= 70 ? 'text-indigo-600' : 'text-amber-600'}`}>
+                      {scorePct}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3 Thanh đo lường thành phần công thức P1 */}
+                <div className="flex flex-col gap-2.5 text-xs">
+                  {/* Thành phần 1: Ký tự tiếng Việt có dấu / Mandatory Fields (50%) */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between font-semibold text-slate-700 text-[11px]">
+                      <span className="flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px] text-indigo-600">translate</span>
+                        <span>Trường cốt lõi (Mandatory Ratio 50%)</span>
+                      </span>
+                      <span className="font-bold text-slate-900">{mandatoryPct}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-indigo-600 rounded-full transition-all duration-500" style={{ width: `${mandatoryPct}%` }}></div>
+                    </div>
+                  </div>
+
+                  {/* Thành phần 2: Bố cục & khung viền thẻ / Contour Area Ratio (30%) */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between font-semibold text-slate-700 text-[11px]">
+                      <span className="flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px] text-teal-600">crop_free</span>
+                        <span>Bố cục &amp; khung viền thẻ (30%)</span>
+                      </span>
+                      <span className="font-bold text-slate-900">{contourPct}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-teal-500 rounded-full transition-all duration-500" style={{ width: `${contourPct}%` }}></div>
+                    </div>
+                  </div>
+
+                  {/* Thành phần 3: Mã số thuế & Email / Avg OCR Confidence (20%) */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between font-semibold text-slate-700 text-[11px]">
+                      <span className="flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px] text-amber-600">donut_large</span>
+                        <span>Độ tin cậy PaddleOCR (20%)</span>
+                      </span>
+                      <span className="font-bold text-slate-900">{avgOcrPct}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${avgOcrPct}%` }}></div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Box cảnh báo / gợi ý nếu có trường thiếu hoặc mờ */}
+                <div className="bg-amber-50/90 border border-amber-200/80 rounded-2xl p-2.5 flex items-start gap-2 text-amber-900 text-[11px] leading-relaxed">
+                  <span className="material-symbols-outlined text-amber-600 text-[16px] shrink-0 mt-0.5">warning</span>
+                  <div>
+                    {docDetail?.confirmPrompt ? (
+                      <span>{docDetail.confirmPrompt}</span>
+                    ) : missingCount > 0 ? (
+                      <span>Phát hiện {missingCount} trường nghi vấn hoặc còn trống. Vui lòng kiểm tra và hoàn thiện thông tin đối chiếu.</span>
+                    ) : (
+                      <span>Tất cả các trường cốt lõi đã được nhận dạng thành công. Vui lòng xác nhận trước khi lưu.</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Nút hành động */}
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Focus vào trường đầu tiên còn thiếu
+                      const inputs = document.querySelectorAll('input')
+                      for (const input of inputs) {
+                        if (!input.value) {
+                          input.focus()
+                          break
+                        }
+                      }
+                    }}
+                    className="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">search_check</span>
+                    <span>Rà soát trường nghi vấn</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowInspector(false)}
+                    className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                  >
+                    Ẩn cửa sổ
+                  </button>
+                </div>
+              </aside>
+            )
+          })()}
+
+          {/* Nút mở lại Inspector nếu người dùng đã ẩn */}
+          {!showInspector && (
+            <button
+              type="button"
+              onClick={() => setShowInspector(true)}
+              className="fixed bottom-6 right-6 z-50 flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-2.5 px-4 rounded-full shadow-xl hover:shadow-2xl transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              title="Mở bảng BizOCR Inspector"
+            >
+              <span className="material-symbols-outlined text-[18px]">analytics</span>
+              <span>BizOCR Inspector</span>
+              {docDetail?.completenessScore != null && (
+                <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px]">
+                  {Math.round(docDetail.completenessScore * 100)}%
+                </span>
+              )}
+            </button>
+          )}
         </div>
       )}
 

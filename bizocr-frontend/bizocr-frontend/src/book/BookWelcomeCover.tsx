@@ -53,7 +53,7 @@ export default function BookWelcomeCover({ onOpenBook }: Props) {
           <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#f0ede9] shadow-sm mb-4">
             <span className="w-2.5 h-2.5 rounded-full bg-[#3525cd] animate-pulse"></span>
             <span className="font-semibold text-xs text-[#464555] tracking-wider uppercase">
-              Phiên bản Doanh nhân 2025
+              Phiên bản Doanh nhân 2026
             </span>
           </div>
 

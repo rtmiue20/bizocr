@@ -242,12 +242,10 @@ public class OllamaQueueService implements SmartLifecycle {
             specificInstructions = """
                 
                 [QUY TẮC BẮT BUỘC RIÊNG CHO DANH THIẾP / NAMECARD]
-                1. SĐT cá nhân (phone): BẮT BUỘC là số di động (bắt đầu bằng 09, 03, 07, 05, hoặc 081-089, +84). KHÔNG BAO GIỜ gộp nhiều số bằng dấu phẩy.
-                2. SĐT công ty (company_phone): Là số điện thoại cố định / máy bàn (bắt đầu bằng 02x, hoặc 08/04 mã vùng cũ, vd: 08 3847 6888).
-                3. Fax: Số fax (thường là số máy bàn thứ hai, hoặc có tiền tố Fax, vd: 08 3847 9080).
-                4. Tên công ty (company_name): Lấy tên thương hiệu / tên công ty viết hoa (vd: "ATOZ", "ATOZ TRAVEL"). TUYỆT ĐỐI KHÔNG điền tên miền website (như Qatoztravel.vn, abc.com) vào trường tên công ty.
-                5. Email cá nhân (email): Chỉ điền địa chỉ email thật (user@domain). KHÔNG điền nick Skype, Yahoo ID hay chuỗi có chữ /Skype, /Zalo. Nếu không có thì để null.
-                6. Email công ty (company_email): Email chung (cskh@..., info@...). Loại bỏ ký tự OCR sai sau dấu @ nếu có (vd: cskh@Qatoztravel.vn -> cskh@atoztravel.vn).
+                1. SĐT và Email: Trích xuất các số điện thoại và email tìm thấy từ thẻ (kèm nhãn nếu có). KHÔNG gộp nhiều số điện thoại vào một trường.
+                2. Tên công ty (company_name): Lấy tên thương hiệu / tên công ty viết hoa (vd: "FORLYBRAND", "KHAI HOAN LAND"). TUYỆT ĐỐI KHÔNG điền tên miền website vào trường tên công ty.
+                3. Tên người (contact_name) & Chức danh (contact_title): Bóc tách đúng thông tin cá nhân của người sở hữu danh thiếp.
+                4. Nếu trường nào không có dữ liệu, hãy để null. Bộ định tuyến hệ thống sẽ tự động gán vào khối cá nhân hoặc công ty theo quy tắc chuẩn.
                 """;
         }
 

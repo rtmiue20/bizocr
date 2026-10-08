@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS documents (
 
     contact_name          VARCHAR(255),
     contact_title         VARCHAR(255),
+    industry              VARCHAR(255),
+    approved_at           DATETIME,
 
     -- ML / Continuous Learning fields (Từ Migration V2)
     predicted_fields_json JSON         COMMENT 'Snapshot dự đoán của model tại thời điểm bóc tách (chưa bị human ghi đè)',
@@ -127,6 +129,7 @@ CREATE TABLE IF NOT EXISTS documents (
     KEY idx_documents_tax_code (tax_code),
     KEY idx_documents_issue_date (issue_date),
     KEY idx_documents_total_amount (total_amount),
+    KEY idx_documents_cards (owner_company_id, status, approved_at),
     -- Chỉ mục cho vòng lặp huấn luyện (Từ Migration V3)
     KEY idx_documents_training (training_eligible, training_batch_id),
     CONSTRAINT fk_documents_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL
@@ -258,6 +261,8 @@ CREATE TABLE IF NOT EXISTS contacts (
     notes                 TEXT,
     tags                  VARCHAR(500),                     -- "khách hàng,VIP,tech" phân cách dấu phẩy
     last_contacted        DATETIME,
+    industry              VARCHAR(255),
+    approved_at           DATETIME,
 
     -- Dedup: OK | POSSIBLE_DUPLICATE
     dedup_status          VARCHAR(20)   NOT NULL DEFAULT 'OK',
@@ -272,6 +277,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     KEY idx_contacts_phone          (phone),
     KEY idx_contacts_company        (company_id),
     KEY idx_contacts_dedup          (dedup_status),
+    KEY idx_contacts_cards          (owner_company_id, approved_at),
     FULLTEXT KEY ft_contacts_name   (normalized_name),
     CONSTRAINT fk_contacts_document      FOREIGN KEY (document_id)    REFERENCES documents(id)  ON DELETE SET NULL,
     CONSTRAINT fk_contacts_company       FOREIGN KEY (company_id)     REFERENCES companies(id)  ON DELETE SET NULL,
@@ -297,4 +303,14 @@ CREATE TABLE IF NOT EXISTS document_images (
     UNIQUE KEY uk_doc_side    (document_id, side),
     KEY idx_doc_images_doc    (document_id),
     CONSTRAINT fk_doc_images_document FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-) ENGINE=InnoDB COMMENT='Ảnh mặt trước/sau namecard, hỗ trợ thumbnail và OCR mặt sau nhẹ';
+) ENGINE=InnoDB COMMENT='Ảnh mặt trước/sau namecard, hỗ trợ thumbnail và OCR mặt sau nhẹ';
+
+-- Migration an toàn cho các DB đã chạy trước đó:
+-- Thêm cột nếu chưa tồn tại
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS industry VARCHAR(255);
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS approved_at DATETIME;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS industry VARCHAR(255);
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS approved_at DATETIME;
+
+
+

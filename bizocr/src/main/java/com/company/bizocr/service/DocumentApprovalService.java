@@ -52,6 +52,8 @@ public class DocumentApprovalService {
     private final ExtractionValidatorService extractionValidatorService;
     private final TrainingBatchService trainingBatchService;
     private final ContactDeduplicationService contactDeduplicationService;
+    private final com.company.bizocr.company.CompanyFinderService companyFinderService;
+
 
     @Transactional
     public Mono<DocumentApproveResponse> approveDocument(Long documentId, DocumentApproveRequest request, CurrentUser reviewer) {
@@ -75,6 +77,23 @@ public class DocumentApprovalService {
                             && !doc.getExtractedFields().isBlank())
                             ? doc.getExtractedFields()
                             : "{}";
+
+                    // ── Validate request: phải có ít nhất taxCode hoặc companyName ──────────
+                    boolean hasFields = request.getUpdatedFields() != null
+                            && !request.getUpdatedFields().isEmpty();
+                    boolean hasCompanyId = (request.getTaxCode() != null && !request.getTaxCode().isBlank())
+                            || (request.getCompanyName() != null && !request.getCompanyName().isBlank());
+                    if (!hasFields && !hasCompanyId) {
+                        log.error("[Approve] documentId={} — request thiếu updatedFields, taxCode và companyName. " +
+                                "Có thể payload từ frontend không khớp DTO. " +
+                                "approvedType={}, contactName={}",
+                                documentId, request.getApprovedType(), request.getContactName());
+                        return Mono.error(new IllegalArgumentException(
+                                "Thiếu dữ liệu để duyệt: request phải có taxCode hoặc companyName (hoặc updatedFields)"));
+                    }
+                    log.debug("[Approve] documentId={} taxCode={} companyName={} updatedFields.size={}",
+                            documentId, request.getTaxCode(), request.getCompanyName(),
+                            hasFields ? request.getUpdatedFields().size() : 0);
 
                     return taxApiClient.lookup(request.getTaxCode(), request.getCompanyName())
                             .defaultIfEmpty(new TaxLookupResponse())
@@ -112,6 +131,13 @@ public class DocumentApprovalService {
                                             doc.setReviewedBy(reviewer.username());
                                             doc.setReviewedAt(LocalDateTime.now().format(
                                                     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+                                            if (doc.getApprovedAt() == null) {
+                                                doc.setApprovedAt(LocalDateTime.now());
+                                            }
+                                            String industryVal = getStringField(request.getUpdatedFields(), "industry", "nganh_nghe");
+                                            if (industryVal != null && !industryVal.isBlank()) {
+                                                doc.setIndustry(industryVal);
+                                            }
                                         } catch (Exception e) {
                                             return Mono.error(e);
                                         }
@@ -282,11 +308,10 @@ public class DocumentApprovalService {
 
         String normalizedName = nameNormalizer.normalize(finalName);
 
-        return companyRepository.findByNormalizedName(normalizedName)
-                .switchIfEmpty(
-                        aliasRepository.findByNormalizedAlias(normalizedName)
-                                .flatMap(alias -> companyRepository.findById(alias.getCompanyId()))
-                )
+        // Dùng CompanyFinderService: chịu được nhiều dòng trùng normalized_name trong DB,
+        // bỏ qua tên rỗng, tự fallback alias.
+        return companyFinderService
+                .findBestByNameOrAlias(normalizedName)
                 .switchIfEmpty(Mono.defer(() -> {
                     log.info("[Approve] Không có MST, tạo Company mới chỉ theo tên: {}", finalName);
                     Company newCompany = Company.builder()
@@ -296,7 +321,9 @@ public class DocumentApprovalService {
                             .active(true)
                             .createdAt(LocalDateTime.now().toString())
                             .build();
-                    return companyRepository.save(newCompany)
+                    // saveOrFetch: phòng race condition — nếu luồng khác đã tạo cùng normalized_name
+                    // thì đọc lại dòng đó thay vì nổ DuplicateKeyException
+                    return companyFinderService.saveOrFetch(newCompany)
                             .doOnError(e -> log.error(
                                     "[Approve] Lỗi tạo Company mới (không có MST) name={}: {}",
                                     finalName, e.getMessage(), e));
@@ -355,6 +382,11 @@ public class DocumentApprovalService {
         String department = getStringField(fields, "department");
         String address = getStringField(fields, "address");
 
+        String industry = getStringField(fields, "industry", "nganh_nghe");
+        if (industry == null && company != null) {
+            industry = company.getIndustry();
+        }
+
         Contact newContact = Contact.builder()
                 .ownerCompanyId(reviewer.companyId())
                 .createdBy(reviewer.userId() != null ? reviewer.userId() : 0L)
@@ -370,6 +402,8 @@ public class DocumentApprovalService {
                 .fax(fax)
                 .companyPhone(companyPhone)
                 .companyEmail(companyEmail)
+                .industry(industry)
+                .approvedAt(savedDoc.getApprovedAt() != null ? savedDoc.getApprovedAt() : LocalDateTime.now())
                 .notes(address != null && !address.isBlank() ? "Địa chỉ: " + address : null)
                 .build();
 
@@ -377,6 +411,7 @@ public class DocumentApprovalService {
     }
 
     private String getStringField(Map<String, Object> map, String... keys) {
+        if (map == null) return null;
         for (String k : keys) {
             Object v = map.get(k);
             if (v != null && !v.toString().isBlank()) {

@@ -38,6 +38,7 @@ public class CompanyResolverService {
     private final CompanyNameNormalizer nameNormalizer;
     private final TaxApiClient taxApiClient;
     private final ExternalTaxSearchService externalTaxSearchService;
+    private final CompanyFinderService companyFinderService;
 
     private static final Pattern TAX_CODE_PATTERN =
             Pattern.compile(
@@ -88,19 +89,15 @@ public class CompanyResolverService {
         }
         String normalizedName = nameNormalizer.normalize(companyName);
 
-        return companyRepository
-                .findByNormalizedName(normalizedName)
+        // Dùng CompanyFinderService: chịu được nhiều dòng trùng normalized_name,
+        // bỏ qua tên rỗng, tự fallback alias bên trong.
+        return companyFinderService
+                .findBestByNameOrAlias(normalizedName)
                 .filter(this::isActive)
                 .map(company -> toCompanyInfo(company, 0.98, "NAME_EXACT"))
-                .switchIfEmpty(
-                        companyAliasRepository
-                                .findByNormalizedAlias(normalizedName)
-                                .flatMap(alias -> companyRepository.findById(alias.getCompanyId()))
-                                .filter(this::isActive)
-                                .map(company -> toCompanyInfo(company, 0.95, "ALIAS"))
-                )
                 .switchIfEmpty(Mono.defer(() -> resolveViaExternalSources(rawText, companyName, normalizedName)));
     }
+
 
     /**
      * Luồng Fallback API ngoài:
@@ -179,9 +176,11 @@ public class CompanyResolverService {
                 .createdAt(LocalDateTime.now().toString())
                 .build();
 
-        return companyRepository.save(unverified)
+        // saveOrFetch: phòng race condition khi nhiều pipeline xử lý cùng lúc
+        return companyFinderService.saveOrFetch(unverified)
                 .map(saved -> toCompanyInfo(saved, 0.5, "OCR_ONLY"));
     }
+
 
     private Mono<Company> selfLearnAlias(Company company, String rawAlias) {
         if (rawAlias == null || rawAlias.isBlank() || rawAlias.equalsIgnoreCase(company.getLegalName())) {

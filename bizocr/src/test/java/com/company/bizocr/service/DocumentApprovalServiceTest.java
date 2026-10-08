@@ -75,11 +75,16 @@ class DocumentApprovalServiceTest {
         extractionValidatorService = mock(ExtractionValidatorService.class);
         trainingBatchService = mock(TrainingBatchService.class);
 
+        ContactDeduplicationService contactDeduplicationService = mock(ContactDeduplicationService.class);
+        com.company.bizocr.company.CompanyFinderService companyFinderService =
+                new com.company.bizocr.company.CompanyFinderService(companyRepository, aliasRepository);
+
         service = new DocumentApprovalService(
                 documentRepository, companyRepository, aliasRepository, taxApiClient,
                 new ObjectMapper(), nameNormalizer, externalTaxSearchService,
                 industryRepository, fieldAuditService, stateMachine,
-                extractionValidatorService, trainingBatchService);
+                extractionValidatorService, trainingBatchService, contactDeduplicationService,
+                companyFinderService);
 
         // Stub các nhánh phụ không liên quan tới bất biến đang test, để test tập trung vào upsertCompany
         when(fieldAuditService.logFieldCorrections(any(Document.class), anyString(), anyString())).thenReturn(Mono.empty());

@@ -13,6 +13,10 @@ public record CurrentUser(
         this(userId, username, roles, companyId, false);
     }
 
+    public CurrentUser(String username, List<String> roles, Long companyId) {
+        this(null, username, roles, companyId, false);
+    }
+
     public CurrentUser(String username, List<String> roles, Long companyId, boolean trustedLabeler) {
         this(null, username, roles, companyId, trustedLabeler);
     }

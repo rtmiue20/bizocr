@@ -8,9 +8,9 @@ import ProcessImageFlow from './book/ProcessImageFlow'
 import SearchView from './book/SearchView'
 import ProfileView from './book/ProfileView'
 import ConfigPage from './pages/ConfigPage'
-
 export default function App() {
-  const [authed, setAuthed] = useState(!!getToken())
+  // Khi restart/mở lại ứng dụng: luôn bắt đầu ở màn hình Login
+  const [authed, setAuthed] = useState(false)
   // Trạng thái đã lật mở sổ hay đang ở bìa chào đón
   const [bookOpened, setBookOpened] = useState(false)
   // Tab hiện tại trên thanh công cụ: Dashboard | ProcessImage | Search | Profile

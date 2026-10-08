@@ -538,11 +538,22 @@ public class RegexExtractorService {
         String landlineLabeled = null;
         String faxLabeled = null;
 
-        Pattern mobileLabelPattern = Pattern.compile("(?i)(?:\\b(?:dd|đd|dld|dtdd|đtdđ|mobile|cell|hp|handphone)\\b|\\bdd\\b|\\bđd\\b)[\\s.:/-]*([+0-9\\s.()-]{8,20})");
-        Pattern landlineLabelPattern = Pattern.compile("(?i)(?:\\b(?:tel|phone|office|dt|đt)\\b)[\\s.:/-]*([+0-9\\s.()-]{8,20})");
-        Pattern faxLabelPattern = Pattern.compile("(?i)(?:\\b(?:fax|f)\\b)[\\s.:/-]*([+0-9\\s.()-]{8,20})");
+        // Label "di động / mobile" → phone cá nhân
+        Pattern mobileLabelPattern = Pattern.compile(
+                "(?i)(?:\\b(?:dd|đd|dld|dtdd|đtdđ|mobile|cell|hp|handphone|di dong)\\b)[\\s.:/-]*([+0-9\\s.()-]{8,20})"
+        );
+        // Label "cố định / văn phòng / hotline / tổng đài" → company_phone
+        Pattern landlineLabelPattern = Pattern.compile(
+                "(?i)(?:\\b(?:tel|telephone|phone|office|dt|đt|hotline|tong dai|1800|1900)\\b)[\\s.:/-]*([+0-9\\s.()-]{6,20})"
+        );
+        Pattern faxLabelPattern = Pattern.compile(
+                "(?i)(?:\\b(?:fax|f)\\b)[\\s.:/-]*([+0-9\\s.()-]{8,20})"
+        );
 
-        Pattern anyPhonePattern = Pattern.compile("(?i)(?:\\+?84|0)[0-9 \\t.()-]{8,18}");
+        // Bắt tất cả số: di động (+84, 0xx), máy bàn (02x), tổng đài miễn phí (1800/1900)
+        Pattern anyPhonePattern = Pattern.compile(
+                "(?i)(?:1[89]00[\\s.-]?\\d{4,6}|(?:\\+?84|0)[0-9 \\t.()-]{8,18})"
+        );
         List<String> mobileList = new ArrayList<>();
         List<String> landlineList = new ArrayList<>();
 
@@ -568,6 +579,12 @@ public class RegexExtractorService {
             while (m.find()) {
                 String raw = m.group().trim();
                 String clean = raw.replaceAll("[^0-9+]", "");
+                // 1800/1900: độ dài 8-10 chữ số, luôn là máy bàn/tổng đài
+                boolean isTollFree = clean.startsWith("1800") || clean.startsWith("1900");
+                if (isTollFree && clean.length() >= 8 && clean.length() <= 11) {
+                    if (!landlineList.contains(raw)) landlineList.add(raw);
+                    continue;
+                }
                 if (clean.length() >= 9 && clean.length() <= 12) {
                     String normClean = clean;
                     if (clean.startsWith("+84") && clean.length() >= 11) {

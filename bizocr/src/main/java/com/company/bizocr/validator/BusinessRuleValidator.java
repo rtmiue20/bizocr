@@ -10,6 +10,7 @@ import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * Validator nghiệp vụ chuyên sâu cho tài liệu OCR Việt Nam:
@@ -97,16 +98,44 @@ public class BusinessRuleValidator {
         // 2. Đối sánh sau chuẩn hóa (bỏ dấu tiếng Việt, viết hoa, gom khoảng trắng)
         String normField = nameNormalizer.normalize(fieldValue);
         String normOcr = nameNormalizer.normalize(rawOcrText);
-        if (normOcr.contains(normField)) {
+        if (!normField.isBlank() && normOcr.contains(normField)) {
             return true;
         }
 
-        // 3. Nếu là số hoặc ngày (VD: MST, ngày tháng, tiền 500,000 -> 500000) -> so sánh chuỗi số liên tục
+        // 2b. Đối sánh sau khi xóa toàn bộ khoảng trắng (xử lý "0912 345 678" vs "0912345678").
+        //     Tránh false positive cho trường văn bản bằng cách chỉ áp dụng khi chuỗi chứa nhiều chữ số.
+        String compactField = normField.replace(" ", "");
+        String compactOcr   = normOcr.replace(" ", "");
+        if (!compactField.isBlank() && compactOcr.contains(compactField)) {
+            // Yêu cầu ít nhất 40% ký tự là chữ số để tránh false positive với tên công ty
+            long digitCount = compactField.chars().filter(Character::isDigit).count();
+            if (digitCount * 100 / compactField.length() >= 40) {
+                return true;
+            }
+        }
+
+        // 3. Nếu là chuỗi số (MST, SĐT, tiền 500,000 → 500000):
+        //    Xây dựng regex cho phép ký tự phân cách (dấu chấm, gạch ngang, khoảng trắng) giữa các chữ số.
+        //    Tránh ghép toàn bộ chữ số OCR thành một chuỗi (gây false positive).
         String digitsOnlyField = fieldValue.replaceAll("[^0-9]", "");
         if (digitsOnlyField.length() >= 4) {
-            String digitsOnlyOcr = rawOcrText.replaceAll("[^0-9]", "");
-            if (digitsOnlyOcr.contains(digitsOnlyField)) {
-                return true;
+            // Pattern: mỗi chữ số có thể cách nhau bởi ký tự phân cách (dấu chấm, gạch, khoảng trắng)
+            StringBuilder sb = new StringBuilder("(?<![0-9])");
+            for (char c : digitsOnlyField.toCharArray()) {
+                sb.append(c).append("[\\s.,.-]*");
+            }
+            // Xóa đuôi "[\s.,.-]*" thừa và thêm lookahead
+            String flexPattern = sb.substring(0, sb.lastIndexOf("[")) + "(?![0-9])";
+            try {
+                if (Pattern.compile(flexPattern).matcher(rawOcrText).find()) {
+                    return true;
+                }
+            } catch (PatternSyntaxException e) {
+                // Fallback: so sánh chuỗi số ghép
+                String digitsOnlyOcr = rawOcrText.replaceAll("[^0-9]", "");
+                if (digitsOnlyOcr.contains(digitsOnlyField)) {
+                    return true;
+                }
             }
         }
 

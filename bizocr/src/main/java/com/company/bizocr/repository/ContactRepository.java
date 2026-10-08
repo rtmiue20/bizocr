@@ -66,4 +66,55 @@ public interface ContactRepository extends R2dbcRepository<Contact, Long> {
 
     /** Tìm contact theo document_id nguồn. */
     Mono<Contact> findByDocumentIdAndOwnerCompanyId(Long documentId, Long ownerCompanyId);
+
+    /**
+     * Bước 4: Lưới danh thiếp đã duyệt (APPROVED).
+     * Sắp xếp theo approved_at DESC, id DESC.
+     */
+    @Query("""
+            SELECT c.* FROM contacts c
+            JOIN documents d ON d.id = c.document_id
+            WHERE c.owner_company_id = :ownerId
+              AND d.status = 'APPROVED'
+              AND (:industry IS NULL OR :industry = '' OR c.industry = :industry OR (:industry = 'Khác' AND (c.industry IS NULL OR c.industry = '')))
+            ORDER BY COALESCE(c.approved_at, c.created_at) DESC, c.id DESC
+            LIMIT :limit OFFSET :offset
+            """)
+    Flux<Contact> findApprovedCards(Long ownerId, String industry, long limit, long offset);
+
+    @Query("""
+            SELECT COUNT(*) FROM contacts c
+            JOIN documents d ON d.id = c.document_id
+            WHERE c.owner_company_id = :ownerId
+              AND d.status = 'APPROVED'
+              AND (:industry IS NULL OR :industry = '' OR c.industry = :industry OR (:industry = 'Khác' AND (c.industry IS NULL OR c.industry = '')))
+            """)
+    Mono<Long> countApprovedCards(Long ownerId, String industry);
+
+    /**
+     * Bước 5: Tìm kiếm trên danh thiếp đã duyệt (APPROVED).
+     */
+    @Query("""
+            SELECT c.* FROM contacts c
+            JOIN documents d ON d.id = c.document_id
+            WHERE c.owner_company_id = :ownerId
+              AND d.status = 'APPROVED'
+              AND (:industry IS NULL OR :industry = '' OR c.industry = :industry OR (:industry = 'Khác' AND (c.industry IS NULL OR c.industry = '')))
+              AND MATCH(c.normalized_name) AGAINST(:q IN BOOLEAN MODE)
+            ORDER BY COALESCE(c.approved_at, c.created_at) DESC, c.id DESC
+            LIMIT :limit OFFSET :offset
+            """)
+    Flux<Contact> searchApprovedCards(String q, Long ownerId, String industry, long limit, long offset);
+
+    @Query("""
+            SELECT COUNT(*) FROM contacts c
+            JOIN documents d ON d.id = c.document_id
+            WHERE c.owner_company_id = :ownerId
+              AND d.status = 'APPROVED'
+              AND (:industry IS NULL OR :industry = '' OR c.industry = :industry OR (:industry = 'Khác' AND (c.industry IS NULL OR c.industry = '')))
+              AND MATCH(c.normalized_name) AGAINST(:q IN BOOLEAN MODE)
+            """)
+    Mono<Long> countSearchApprovedCards(String q, Long ownerId, String industry);
+
+
 }

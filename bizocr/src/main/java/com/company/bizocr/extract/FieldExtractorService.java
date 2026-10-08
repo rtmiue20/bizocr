@@ -277,6 +277,12 @@ public class FieldExtractorService {
 
     private String repairEmail(String value) {
         if (value == null || value.isBlank()) return value;
+        // Chỉ thử sửa khi chưa có '@' hợp lệ trong chuỗi.
+        // Nếu đã có '@', OCR đã nhận đúng ký tự này — không nên thay thêm 'o/O/0' nữa
+        // vì có thể làm hỏng email đúng (vd: "user.o.name@company.vn").
+        if (value.contains("@")) {
+            return value;
+        }
         Matcher matcher = EMAIL_ARTIFACT_PATTERN.matcher(value);
         return matcher.find() ? matcher.replaceAll("$1@$2.$3") : value;
     }

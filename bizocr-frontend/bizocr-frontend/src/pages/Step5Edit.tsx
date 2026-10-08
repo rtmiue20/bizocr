@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useState} from 'react'
 import {api} from '../api'
 import DocSelect from '../components/DocSelect'
-import {labelOf, splitBySchema} from '../docSchemas'
+import {labelOf, groupOf, splitBySchema} from '../docSchemas'
 import {whoami} from '../layout/Shell'
 import {RE, STATUS_CLS, digits, fmtDate, keyOf, parseFields, restore, show, type Fields} from '../lib'
 import {STATUS_LABEL, type Doc} from '../types'
@@ -218,13 +218,17 @@ export default function Step5Edit({docId, onSelect, onNext}: {
 
                                 {Object.keys(edit).length === 0 &&
                                     <p className="text-on-surface-variant">Chưa có trường nào được bóc tách.</p>}
-                                <div className="grid grid-cols-1 gap-space-md md:grid-cols-2">
-                                    {Object.keys(edit).map((k) => {
+
+                                {(() => {
+                                    const allKeys = Object.keys(edit)
+                                    const hasGroups = allKeys.some((k) => !!groupOf(doc.documentType, k))
+
+                                    const renderField = (k: string) => {
                                         const mstOk = k === mstK ? /^\d{10}(-\d{3})?$/.test(edit[k].replace(/\s/g, '')) : null
                                         const money = k === subK || k === vatK || k === totK
                                         return (
                                             <label key={k}
-                                                   className="flex flex-col gap-1.5 rounded-xl bg-surface-container-low p-space-md">
+                                                   className="flex flex-col gap-1.5 rounded-xl bg-surface-container-low p-space-md shadow-sm">
                                                 <span className="flex items-center justify-between gap-2">
                                                   <span
                                                       className={`font-label-md text-label-md font-semibold ${changed.includes(k) ? 'text-tertiary-fixed-dim' : 'text-on-surface'}`}>{labelOf(doc.documentType, k)}{changed.includes(k) && ' (đã sửa)'}</span>
@@ -252,8 +256,60 @@ export default function Step5Edit({docId, onSelect, onNext}: {
                                                 )}
                                             </label>
                                         )
-                                    })}
-                                </div>
+                                    }
+
+                                    if (!hasGroups) {
+                                        return (
+                                            <div className="grid grid-cols-1 gap-space-md md:grid-cols-2">
+                                                {allKeys.map(renderField)}
+                                            </div>
+                                        )
+                                    }
+
+                                    const personKeys = allKeys.filter((k) => groupOf(doc.documentType, k) === 'person')
+                                    const companyKeys = allKeys.filter((k) => groupOf(doc.documentType, k) === 'company')
+                                    const otherKeys = allKeys.filter((k) => !groupOf(doc.documentType, k))
+
+                                    return (
+                                        <div className="flex flex-col gap-6">
+                                            {personKeys.length > 0 && (
+                                                <div className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest/70 p-4 border border-primary/20">
+                                                    <div className="flex items-center gap-2 pb-1 border-b border-outline-variant/30 text-primary">
+                                                        <span className="material-symbols-outlined text-[20px]">person</span>
+                                                        <span className="text-xs sm:text-sm font-bold uppercase tracking-wider">Thông tin cá nhân</span>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 gap-space-md md:grid-cols-2">
+                                                        {personKeys.map(renderField)}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {companyKeys.length > 0 && (
+                                                <div className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest/70 p-4 border border-secondary/20">
+                                                    <div className="flex items-center gap-2 pb-1 border-b border-outline-variant/30 text-secondary">
+                                                        <span className="material-symbols-outlined text-[20px]">apartment</span>
+                                                        <span className="text-xs sm:text-sm font-bold uppercase tracking-wider">Thông tin công ty</span>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 gap-space-md md:grid-cols-2">
+                                                        {companyKeys.map(renderField)}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {otherKeys.length > 0 && (
+                                                <div className="flex flex-col gap-3 rounded-2xl bg-surface-container-lowest/70 p-4 border border-outline-variant/40">
+                                                    <div className="flex items-center gap-2 pb-1 border-b border-outline-variant/30 text-on-surface-variant">
+                                                        <span className="material-symbols-outlined text-[20px]">info</span>
+                                                        <span className="text-xs sm:text-sm font-bold uppercase tracking-wider">Thông tin bổ sung</span>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 gap-space-md md:grid-cols-2">
+                                                        {otherKeys.map(renderField)}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                })()}
 
                                 {totK && !isNaN(calc) && (
                                     <div

@@ -98,6 +98,11 @@ public class Contact {
     @Column("last_contacted")
     private LocalDateTime lastContacted;
 
+    private String industry;
+
+    @Column("approved_at")
+    private LocalDateTime approvedAt;
+
     // ── Dedup ─────────────────────────────────────────────────────────────
 
     /**

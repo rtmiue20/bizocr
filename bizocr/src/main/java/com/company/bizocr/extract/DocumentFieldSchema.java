@@ -25,17 +25,21 @@ public final class DocumentFieldSchema {
     private DocumentFieldSchema() {
     }
 
-    /** key = key chuẩn; label = tiêu đề hiển thị; hint = mô tả đưa vào prompt; match = các tên key (đã chuẩn hóa) coi là cùng trường. */
-    public record Field(String key, String label, String hint, List<String> match) {
+    /** key = key chuẩn; label = tiêu đề hiển thị; hint = mô tả đưa vào prompt; match = các tên key (đã chuẩn hóa) coi là cùng trường; group = nhóm trường (person, company hoặc null). */
+    public record Field(String key, String label, String hint, List<String> match, String group) {
     }
 
     private static Field f(String key, String label, String hint, String... aliases) {
+        return fWithGroup(key, label, hint, null, aliases);
+    }
+
+    private static Field fWithGroup(String key, String label, String hint, String group, String... aliases) {
         List<String> m = new ArrayList<>();
         m.add(norm(key));
         for (String a : aliases) {
             m.add(norm(a));
         }
-        return new Field(key, label, hint == null ? label : hint, m);
+        return new Field(key, label, hint == null ? label : hint, m, group);
     }
 
     private static final Map<String, List<Field>> SCHEMAS = new LinkedHashMap<>();
@@ -49,17 +53,21 @@ public final class DocumentFieldSchema {
 
     static {
         SCHEMAS.put("NAMECARD", List.of(
-                f("contact_name", "Họ và tên", "Họ và tên người trên danh thiếp", "name", "fullName", "personInCharge"),
-                f("contact_title", "Chức danh", "Chức danh / Chức vụ (ví dụ: Director, Manager...)", "title", "position", "jobTitle"),
-                f("company_name", "Tên công ty", "Tên công ty / Tổ chức", "company", "issuerName", "organization"),
-                f("phone", "Số ĐT cá nhân", "Số điện thoại di động / cá nhân của người trên danh thiếp", "mobile", "cell", "personalPhone", "sdtCaNhan", "sdt"),
-                f("company_phone", "Số ĐT công ty", "Số điện thoại cơ quan / văn phòng / hotline / tổng đài công ty", "tel", "telephone", "officePhone", "companyPhone", "sdtCongTy"),
-                f("email", "Email cá nhân", "Địa chỉ email cá nhân của người trên danh thiếp", "personalEmail", "mail"),
-                f("company_email", "Email công ty", "Địa chỉ email chung của công ty (info@..., contact@...)", "officeEmail", "corpEmail", "emailCongTy"),
-                f("fax", "Fax", "Số Fax", "faxNumber", "soFax"),
-                f("tax_code", "Mã số thuế", null, "mst", "maSoThue"),
-                f("address", "Địa chỉ", "Địa chỉ cơ quan / Văn phòng"),
-                f("website", "Website", "Trang web", "web", "url")
+                // Khối cá nhân: contact_name, contact_title, phone (số di động), email (email cá nhân)
+                fWithGroup("contact_name", "Họ và tên", "Họ và tên người trên danh thiếp", "person", "name", "fullName", "personInCharge"),
+                fWithGroup("contact_title", "Chức danh", "Chức danh / Chức vụ (ví dụ: Director, Manager...)", "person", "title", "position", "jobTitle"),
+                fWithGroup("phone", "Số ĐT cá nhân", "Số điện thoại di động / cá nhân của người trên danh thiếp", "person", "mobile", "cell", "personalPhone", "sdtCaNhan", "sdt"),
+                fWithGroup("email", "Email cá nhân", "Địa chỉ email cá nhân của người trên danh thiếp (gmail, yahoo, outlook...)", "person", "personalEmail", "mail"),
+
+                // Khối công ty: company_name, tax_code, company_phone, fax, company_email, address, website, industry
+                fWithGroup("company_name", "Tên công ty", "Tên công ty / Tổ chức", "company", "company", "issuerName", "organization"),
+                fWithGroup("tax_code", "Mã số thuế", null, "company", "mst", "maSoThue"),
+                fWithGroup("company_phone", "Số ĐT công ty", "Số điện thoại cơ quan / văn phòng / hotline / tổng đài công ty", "company", "tel", "telephone", "officePhone", "companyPhone", "sdtCongTy"),
+                fWithGroup("fax", "Fax", "Số Fax", "company", "faxNumber", "soFax"),
+                fWithGroup("company_email", "Email công ty", "Địa chỉ email chung của công ty (info@..., contact@... hoặc email tên miền công ty)", "company", "officeEmail", "corpEmail", "emailCongTy"),
+                fWithGroup("address", "Địa chỉ", "Địa chỉ cơ quan / Văn phòng", "company"),
+                fWithGroup("website", "Website", "Trang web", "company", "web", "url"),
+                fWithGroup("industry", "Ngành nghề", "Ngành nghề kinh doanh / Lĩnh vực hoạt động", "company", "nganhNghe")
         ));
 
         SCHEMAS.put("VAT_INVOICE", List.of(

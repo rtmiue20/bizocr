@@ -1,4 +1,4 @@
-import type {Doc, DocPage, Contact, ContactSearchResult, ContactDetailResponse, DocumentImage} from './types'
+import type {Doc, DocPage, Contact, ContactSearchResult, ContactDetailResponse, DocumentImage, DocumentDetailResponse, CardPageResponse, IndustryCountResponse, CardItemResponse} from './types'
 
 const BASE = '/api/v1'
 export const getToken = () => localStorage.getItem('token') ?? sessionStorage.getItem('token')
@@ -63,6 +63,7 @@ export const api = {
         return json<DocPage>(`/documents?${q}`)
     },
     get: (id: number) => json<Doc>(`/documents/${id}`),
+    getDetail: (id: number) => json<DocumentDetailResponse>(`/documents/${id}/detail`),
     file: (id: number) => req(`/documents/${id}/file`).then((r) => r.blob()),
     upload: (file: File) => {
         const fd = new FormData()
@@ -84,18 +85,37 @@ export const api = {
     // Lưu bản sửa (ghi audit từng field ở backend). status bỏ trống = giữ nguyên.
     update: (id: number, d: { status?: string; extractedFields?: string }) =>
         json<Doc>(`/documents/${id}`, body('PUT', d)),
-    approve: (id: number, data: string | Record<string, unknown>) => {
-        const payload = typeof data === 'string'
-            ? (() => {
-                try {
-                    const parsed = JSON.parse(data)
-                    return { updatedFields: parsed }
-                } catch {
-                    return { extractedFields: data }
+    approve: async (id: number, data: string | Record<string, unknown>) => {
+        let payload: Record<string, unknown>
+        if (typeof data === 'string') {
+            try {
+                const parsed = JSON.parse(data)
+                // taxCode / companyName lên top-level để backend DTO bind được
+                payload = {
+                    updatedFields: parsed,
+                    taxCode: parsed['tax_code'] ?? null,
+                    companyName: parsed['company_name'] ?? null,
+                    contactName: parsed['contact_name'] ?? null,
+                    contactTitle: parsed['contact_title'] ?? null,
+                    approvedType: parsed['approvedType'] ?? 'NAMECARD',
                 }
-            })()
-            : data
-        return json<unknown>(`/documents/${id}/approve`, body('POST', payload))
+            } catch {
+                payload = { extractedFields: data }
+            }
+        } else {
+            // data là object (Record) — bọc vào updatedFields, tách top-level fields cho DTO
+            payload = {
+                updatedFields: data,
+                taxCode: (data['tax_code'] as string) ?? null,
+                companyName: (data['company_name'] as string) ?? null,
+                contactName: (data['contact_name'] as string) ?? null,
+                contactTitle: (data['contact_title'] as string) ?? null,
+                approvedType: (data['approvedType'] as string) ?? 'NAMECARD',
+            }
+        }
+        const res = await json<unknown>(`/documents/${id}/approve`, body('POST', payload))
+        window.dispatchEvent(new CustomEvent('cards-invalidated', { detail: { id } }))
+        return res
     },
 
     companySuggestion: (id: number) => json<Record<string, unknown>>(`/documents/${id}/company-suggestion`),
@@ -122,6 +142,19 @@ export const api = {
             req(`/contacts/${id}/confirm-merge`, {method: 'POST'}),
         dismissDuplicate: (id: number) =>
             req(`/contacts/${id}/dismiss-duplicate`, {method: 'DELETE'}),
+    },
+
+    // ── Card Book APIs ────────────────────────────────────────
+    cards: {
+        list: (p: { page?: number; pageSize?: number; industry?: string; q?: string }) => {
+            const q = new URLSearchParams()
+            if (p.page !== undefined) q.set('page', String(p.page))
+            if (p.pageSize !== undefined) q.set('pageSize', String(p.pageSize))
+            if (p.industry && p.industry !== 'Tất cả') q.set('industry', p.industry)
+            if (p.q && p.q.trim()) q.set('q', p.q.trim())
+            return json<CardPageResponse>(`/cards?${q.toString()}`)
+        },
+        industries: () => json<IndustryCountResponse[]>('/cards/industries'),
     }
 }
 

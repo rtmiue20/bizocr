@@ -165,6 +165,12 @@ public class ContactDeduplicationService {
         if (source.getDocumentId() != null) {
             target.setDocumentId(source.getDocumentId());
         }
+        if (source.getIndustry() != null && !source.getIndustry().isBlank()) {
+            target.setIndustry(source.getIndustry());
+        }
+        if (source.getApprovedAt() != null) {
+            target.setApprovedAt(source.getApprovedAt());
+        }
         if (source.getMetAt() != null && !source.getMetAt().isBlank()) {
             target.setMetAt(source.getMetAt());
         }

@@ -53,13 +53,15 @@ class CompanyResolverServiceTest {
         nameNormalizer = new CompanyNameNormalizer(); // implementation thật, không cần mock
         taxApiClient = mock(TaxApiClient.class);
         externalTaxSearchService = mock(ExternalTaxSearchService.class);
+        CompanyFinderService companyFinderService = new CompanyFinderService(companyRepository, companyAliasRepository);
         service = new CompanyResolverService(
-                companyRepository, companyAliasRepository, nameNormalizer, taxApiClient, externalTaxSearchService);
+                companyRepository, companyAliasRepository, nameNormalizer, taxApiClient, externalTaxSearchService, companyFinderService);
 
         // Mặc định: không có alias trùng, để các test không liên quan không phải stub lại
         when(companyAliasRepository.findByNormalizedAlias(anyString())).thenReturn(Mono.empty());
         when(companyAliasRepository.save(any())).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
         when(companyRepository.findByNormalizedName(anyString())).thenReturn(Mono.empty());
+        when(companyRepository.findAllByNormalizedName(anyString())).thenReturn(reactor.core.publisher.Flux.empty());
     }
 
     // ------------------------------------------------------------------

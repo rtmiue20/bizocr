@@ -1,5 +1,6 @@
 package com.company.bizocr.service;
 
+import com.company.bizocr.company.CompanyFinderService;
 import com.company.bizocr.model.dto.request.RegisterRequest;
 import com.company.bizocr.model.entity.Company;
 import com.company.bizocr.model.entity.CompanyVerificationSource;
@@ -24,6 +25,7 @@ public class UserService {
     private final CompanyRepository companyRepository;
     private final PasswordEncoder passwordEncoder;
     private final CompanyNameNormalizer companyNameNormalizer;
+    private final CompanyFinderService companyFinderService;
 
     public Mono<User> register(RegisterRequest req) {
         return userRepository.existsByUsername(req.getUsername())
@@ -61,16 +63,19 @@ public class UserService {
                     .active(true)
                     .createdAt(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")))
                     .build();
-            return companyRepository.save(newCompany);
+            // saveOrFetch: phòng race condition khi nhiều user cùng đăng ký cùng công ty
+            return companyFinderService.saveOrFetch(newCompany);
         });
 
         if (normalizedTaxCode != null && !normalizedTaxCode.isEmpty()) {
+            // Có MST: tra theo MST trước (khớp duy nhất), fallback tên
             return companyRepository.findByTaxCode(normalizedTaxCode)
-                    .switchIfEmpty(companyRepository.findByNormalizedName(normalizedName))
+                    .switchIfEmpty(companyFinderService.findBestByName(normalizedName))
                     .switchIfEmpty(createNewCompanyMono);
         } else {
-            return companyRepository.findByNormalizedName(normalizedName)
+            // Không có MST: dùng CompanyFinderService chịu được nhiều dòng trùng
+            return companyFinderService.findBestByName(normalizedName)
                     .switchIfEmpty(createNewCompanyMono);
         }
     }
-}
+}

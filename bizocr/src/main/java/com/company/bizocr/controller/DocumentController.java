@@ -155,11 +155,39 @@ public class DocumentController {
     // API Lấy file vật lý để hiển thị UI
     @GetMapping("/{id}/file")
     public Mono<ResponseEntity<Resource>> getDocumentFile(@PathVariable Long id) {
+        return serveDocumentImage(id, null);
+    }
+
+    // Bước 3: Endpoint ảnh - GET /api/v1/documents/{id}/image?side=FRONT|BACK
+    @GetMapping("/{id}/image")
+    public Mono<ResponseEntity<Resource>> getDocumentImage(
+            @PathVariable Long id,
+            @RequestParam(required = false, defaultValue = "FRONT") String side) {
+        return serveDocumentImage(id, side);
+    }
+
+    // Bước 3: Endpoint ảnh - GET /api/v1/documents/{id}/thumbnail?side=FRONT|BACK
+    @GetMapping("/{id}/thumbnail")
+    public Mono<ResponseEntity<Resource>> getDocumentThumbnail(
+            @PathVariable Long id,
+            @RequestParam(required = false, defaultValue = "FRONT") String side) {
+        return serveDocumentThumbnail(id, side);
+    }
+
+    private Mono<ResponseEntity<Resource>> serveDocumentImage(Long id, String side) {
         return currentUserResolver.getCurrentUser()
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
                 .flatMap(currentUser -> documentRepository.findByIdAndOwnerCompanyId(id, currentUser.companyId()))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền truy cập")))
-                .flatMap(record -> storageService.loadFileAsResource(record.getFilePath()))
+                .flatMap(doc -> {
+                    if (side != null && !side.isBlank()) {
+                        return documentImageRepository.findByDocumentIdAndSide(doc.getId(), side.toUpperCase().trim())
+                                .map(DocumentImage::getStorageKey)
+                                .defaultIfEmpty(doc.getFilePath())
+                                .flatMap(storageService::loadFileAsResource);
+                    }
+                    return storageService.loadFileAsResource(doc.getFilePath());
+                })
                 .map(resource -> {
                     String filename = resource.getFilename();
                     MediaType mediaType = MediaTypeFactory.getMediaType(filename)
@@ -167,6 +195,35 @@ public class DocumentController {
 
                     return ResponseEntity.ok()
                             .contentType(mediaType)
+                            .header(HttpHeaders.CACHE_CONTROL, "private, max-age=86400")
+                            .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+                            .body(resource);
+                });
+    }
+
+    private Mono<ResponseEntity<Resource>> serveDocumentThumbnail(Long id, String side) {
+        String cleanSide = (side != null && !side.isBlank()) ? side.toUpperCase().trim() : "FRONT";
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> documentRepository.findByIdAndOwnerCompanyId(id, currentUser.companyId()))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy chứng từ hoặc không có quyền truy cập")))
+                .flatMap(doc -> documentImageRepository.findByDocumentIdAndSide(doc.getId(), cleanSide)
+                        .flatMap(img -> {
+                            if (img.getThumbKey() != null && !img.getThumbKey().isBlank()) {
+                                return storageService.loadFileAsResource(img.getThumbKey());
+                            }
+                            return storageService.loadFileAsResource(img.getStorageKey() != null ? img.getStorageKey() : doc.getFilePath());
+                        })
+                        .switchIfEmpty(Mono.defer(() -> storageService.loadFileAsResource(doc.getFilePath())))
+                )
+                .map(resource -> {
+                    String filename = resource.getFilename();
+                    MediaType mediaType = MediaTypeFactory.getMediaType(filename)
+                            .orElse(MediaType.APPLICATION_OCTET_STREAM);
+
+                    return ResponseEntity.ok()
+                            .contentType(mediaType)
+                            .header(HttpHeaders.CACHE_CONTROL, "private, max-age=86400")
                             .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
                             .body(resource);
                 });
@@ -218,6 +275,56 @@ public class DocumentController {
                         HttpStatus.NOT_FOUND,
                         "Không tìm thấy chứng từ hoặc bạn không có quyền truy cập dữ liệu của công ty khác"
                 )));
+    }
+
+    // API Xem chi tiết 1 chứng từ kèm Completeness Score (P1) để người dùng tự xác nhận thông tin
+    @GetMapping("/{id}/detail")
+    public Mono<com.company.bizocr.model.dto.response.DocumentDetailResponse> getDocumentDetail(@PathVariable Long id) {
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMap(currentUser -> documentRepository.findByIdAndOwnerCompanyId(id, currentUser.companyId()))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Không tìm thấy chứng từ hoặc bạn không có quyền truy cập dữ liệu của công ty khác"
+                )))
+                .map(this::mapToDetailResponse);
+    }
+
+    private com.company.bizocr.model.dto.response.DocumentDetailResponse mapToDetailResponse(Document doc) {
+        var builder = com.company.bizocr.model.dto.response.DocumentDetailResponse.builder()
+                .documentId(doc.getId())
+                .fileName(doc.getFileName())
+                .documentType(doc.getDocumentType())
+                .status(doc.getStatus())
+                .matchedBy(doc.getMatchedBy())
+                .confidenceScore(doc.getConfidenceScore())
+                .receivedAt(doc.getReceivedAt())
+                .reviewedBy(doc.getReviewedBy())
+                .reviewedAt(doc.getReviewedAt())
+                .ocrEngine(doc.getOcrEngine())
+                .extractedFields(doc.getExtractedFields());
+
+        if (doc.getExtractedFields() != null && !doc.getExtractedFields().isBlank()) {
+            try {
+                com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(doc.getExtractedFields());
+                if (root.has("_meta")) {
+                    com.fasterxml.jackson.databind.JsonNode meta = root.get("_meta");
+                    if (meta.has("completeness_score")) builder.completenessScore(meta.get("completeness_score").asDouble());
+                    if (meta.has("completeness_grade")) builder.completenessGrade(meta.get("completeness_grade").asText());
+                    if (meta.has("completeness_label")) builder.completenessLabel(meta.get("completeness_label").asText());
+                    if (meta.has("mandatory_fields_ratio")) builder.mandatoryFieldsRatio(meta.get("mandatory_fields_ratio").asDouble());
+                    if (meta.has("contour_area_ratio")) builder.contourAreaRatio(meta.get("contour_area_ratio").asDouble());
+                    if (meta.has("avg_ocr_confidence")) builder.avgOcrConfidence(meta.get("avg_ocr_confidence").asDouble());
+                    if (meta.has("mandatory_filled")) builder.mandatoryFilled(meta.get("mandatory_filled").asInt());
+                    if (meta.has("mandatory_total")) builder.mandatoryTotal(meta.get("mandatory_total").asInt());
+                    if (meta.has("confirm_prompt")) builder.confirmPrompt(meta.get("confirm_prompt").asText());
+                }
+            } catch (Exception e) {
+                log.warn("[DocumentController] Không thể đọc _meta từ extractedFields docId={}: {}", doc.getId(), e.getMessage());
+            }
+        }
+
+        return builder.build();
     }
 
     // API Xuất báo cáo Excel

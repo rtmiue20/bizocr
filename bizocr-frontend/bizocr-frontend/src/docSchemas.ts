@@ -4,7 +4,8 @@ import type {Fields} from './lib'
 // (cả hai được sinh từ cùng một bảng dữ liệu; sửa form thì sửa ở cả hai nơi).
 // Loại chứng từ không có trong SCHEMAS (loại tùy biến) thì hiển thị đúng những key có trong dữ liệu.
 
-export type FieldDef = { key: string; label: string; match: string[] }
+export type FieldGroup = 'person' | 'company'
+export type FieldDef = { key: string; label: string; match: string[]; group?: FieldGroup }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
 
@@ -14,19 +15,30 @@ const def = (key: string, label: string, ...aliases: string[]): FieldDef => ({
     match: [key, ...aliases].map(norm),
 })
 
+const defWithGroup = (key: string, label: string, group: FieldGroup, ...aliases: string[]): FieldDef => ({
+    key,
+    label,
+    group,
+    match: [key, ...aliases].map(norm),
+})
+
 const SCHEMAS: Record<string, FieldDef[]> = {
     NAMECARD: [
-        def('contact_name', 'Họ và tên', 'name', 'fullName', 'personInCharge'),
-        def('contact_title', 'Chức danh', 'title', 'position', 'jobTitle'),
-        def('company_name', 'Tên công ty', 'company', 'issuerName', 'organization'),
-        def('phone', 'Số ĐT cá nhân', 'personalPhone', 'mobile', 'cell', 'sdtCaNhan', 'sdt'),
-        def('company_phone', 'Số ĐT công ty', 'companyPhone', 'officePhone', 'companyTel', 'tel', 'telephone', 'sdtCongTy'),
-        def('email', 'Email cá nhân', 'personalEmail', 'mail'),
-        def('company_email', 'Email công ty', 'officeEmail', 'corpEmail', 'emailCongTy'),
-        def('fax', 'Fax', 'faxNumber', 'soFax'),
-        def('tax_code', 'Mã số thuế', 'mst', 'maSoThue'),
-        def('address', 'Địa chỉ'),
-        def('website', 'Website', 'web', 'url'),
+        // Khối cá nhân: contact_name, contact_title, phone (số di động), email (email cá nhân)
+        defWithGroup('contact_name', 'Họ và tên', 'person', 'name', 'fullName', 'personInCharge'),
+        defWithGroup('contact_title', 'Chức danh', 'person', 'title', 'position', 'jobTitle'),
+        defWithGroup('phone', 'Số ĐT cá nhân', 'person', 'personalPhone', 'mobile', 'cell', 'sdtCaNhan', 'sdt'),
+        defWithGroup('email', 'Email cá nhân', 'person', 'personalEmail', 'mail'),
+
+        // Khối công ty: company_name, tax_code, company_phone, fax, company_email, address, website, industry
+        defWithGroup('company_name', 'Tên công ty', 'company', 'company', 'issuerName', 'organization'),
+        defWithGroup('tax_code', 'Mã số thuế', 'company', 'mst', 'maSoThue'),
+        defWithGroup('company_phone', 'Số ĐT công ty', 'company', 'companyPhone', 'officePhone', 'companyTel', 'tel', 'telephone', 'sdtCongTy'),
+        defWithGroup('fax', 'Fax', 'company', 'faxNumber', 'soFax'),
+        defWithGroup('company_email', 'Email công ty', 'company', 'officeEmail', 'corpEmail', 'emailCongTy'),
+        defWithGroup('address', 'Địa chỉ', 'company'),
+        defWithGroup('website', 'Website', 'company', 'web', 'url'),
+        defWithGroup('industry', 'Ngành nghề', 'company', 'nganhNghe'),
     ],
     VAT_INVOICE: [
         def('invoice_symbol', 'Ký hiệu hóa đơn', 'symbol', 'serial', 'invoiceSerial', 'kyHieu'),
@@ -162,6 +174,9 @@ export const isInternalKey = (k: string) =>
 
 export const labelOf = (type: string | null | undefined, key: string) =>
     schemaOf(type)?.find((d) => d.key === key)?.label ?? key
+
+export const groupOf = (type: string | null | undefined, key: string): FieldGroup | undefined =>
+    schemaOf(type)?.find((d) => d.key === key)?.group
 
 const isEmpty = (v: unknown) => v == null || v === ''
 

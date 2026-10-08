@@ -27,9 +27,6 @@ class FieldExtractorServiceTest {
     @Mock
     private TemplateConfigLoaderService templateConfigLoaderService;
 
-    @Mock
-    private OllamaQueueService ollamaQueueService;
-
     private FieldExtractorService fieldExtractorService;
     private RegexExtractorService regexExtractorService;
     private ExtractionValidatorService extractionValidatorService;
@@ -47,8 +44,7 @@ class FieldExtractorServiceTest {
                 objectMapper,
                 templateConfigLoaderService,
                 regexExtractorService,
-                extractionValidatorService,
-                ollamaQueueService
+                extractionValidatorService
         );
 
         when(templateConfigLoaderService.getFieldConfigs(any())).thenReturn(List.of());
@@ -76,9 +72,6 @@ class FieldExtractorServiceTest {
                             && json.contains("AUTO_APPROVED");
                 })
                 .verifyComplete();
-
-        // Không enqueue vào Ollama vì đã gating pass
-        verify(ollamaQueueService, never()).enqueueTask(any(), any(), any());
     }
 
     @Test
@@ -101,8 +94,5 @@ class FieldExtractorServiceTest {
         StepVerifier.create(fieldExtractorService.extractFields("doc-456", classifyResult, rawText))
                 .expectNextMatches(json -> json.contains("PENDING_AI_WORKER"))
                 .verifyComplete();
-
-        // Enqueue vào Ollama Queue
-        verify(ollamaQueueService, times(1)).enqueueTask(eq("doc-456"), eq("VAT_INVOICE"), eq(rawText));
     }
 }

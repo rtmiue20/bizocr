@@ -120,6 +120,12 @@ public class Document {
     @Column("contact_title")
     private String contactTitle;
 
+    @Column("industry")
+    private String industry;
+
+    @Column("approved_at")
+    private java.time.LocalDateTime approvedAt;
+
     // ── ML / Continuous Learning fields ──────────────────────────────────────
 
     /**

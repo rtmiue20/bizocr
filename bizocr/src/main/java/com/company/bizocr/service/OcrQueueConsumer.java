@@ -174,4 +174,90 @@ public class OcrQueueConsumer {
             };
         }).subscribeOn(Schedulers.boundedElastic());
     }
-}
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // REQUEUE: Chạy lại document từ DLQ
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Chạy lại 1 document cụ thể từ DLQ về queue chính.
+     * Dùng để retry document 2127 (hoặc bất kỳ documentId nào) sau khi đã fix lỗi.
+     *
+     * <pre>
+     * Gọi thủ công qua REST endpoint hoặc actuator:
+     *   POST /api/v1/admin/ocr/requeue/{documentId}
+     * </pre>
+     *
+     * @param documentId ID của document cần chạy lại
+     * @return Mono<Boolean> true nếu đã đẩy vào queue thành công
+     */
+    public Mono<Boolean> requeueDocumentFromDlq(Long documentId) {
+        String docIdStr = String.valueOf(documentId);
+        log.info("[Requeue] Chuẩn bị chạy lại documentId={} từ DLQ", documentId);
+
+        return documentRepository.findById(documentId)
+                .switchIfEmpty(Mono.error(
+                        new IllegalArgumentException("Không tìm thấy document: " + documentId)))
+                .flatMap(doc -> {
+                    // Reset status về PENDING để pipeline xử lý lại từ đầu
+                    doc.setStatus("PENDING");
+                    return documentRepository.save(doc);
+                })
+                .flatMap(doc ->
+                        // Xóa khỏi DLQ (nếu còn đó) để tránh xử lý 2 lần
+                        redisTemplate.opsForList()
+                                .remove(DLQ_NAME, 0, docIdStr)
+                                .then(
+                                        // Đẩy vào đầu queue chính (leftPush = ưu tiên xử lý sớm)
+                                        redisTemplate.opsForList().leftPush(QUEUE_NAME, docIdStr)
+                                )
+                )
+                .map(pushed -> {
+                    log.info("[Requeue] documentId={} đã được đẩy vào queue chính thành công", documentId);
+                    return true;
+                })
+                .doOnError(e -> log.error("[Requeue] Lỗi khi requeue documentId={}: {}", documentId, e.getMessage(), e));
+    }
+
+    /**
+     * Chạy lại toàn bộ document trong DLQ.
+     * Dùng sau khi đã fix lỗi hệ thống (VD: sau khi fix CompanyFinderService).
+     *
+     * @return Mono<Long> số lượng document đã được đẩy lại vào queue
+     */
+    public Mono<Long> requeueAllFromDlq() {
+        log.info("[Requeue] Bắt đầu chạy lại toàn bộ DLQ...");
+
+        return redisTemplate.opsForList()
+                .size(DLQ_NAME)
+                .flatMap(size -> {
+                    if (size == null || size == 0) {
+                        log.info("[Requeue] DLQ rỗng, không có gì để chạy lại");
+                        return Mono.just(0L);
+                    }
+                    log.info("[Requeue] DLQ có {} document, bắt đầu chuyển về queue chính", size);
+
+                    // Pop từng phần tử từ DLQ và push vào queue chính
+                    return Flux.range(0, size.intValue())
+                            .flatMap(i -> redisTemplate.opsForList().rightPop(DLQ_NAME))
+                            .filter(docId -> docId != null && !docId.isBlank())
+                            .flatMap(docId ->
+                                    documentRepository.findById(Long.valueOf(docId))
+                                            .flatMap(doc -> {
+                                                doc.setStatus("PENDING");
+                                                return documentRepository.save(doc);
+                                            })
+                                            .flatMap(doc ->
+                                                    redisTemplate.opsForList().leftPush(QUEUE_NAME, docId)
+                                            )
+                                            .doOnNext(r -> log.info("[Requeue] documentId={} đã đẩy lại queue", docId))
+                                            .onErrorResume(e -> {
+                                                log.error("[Requeue] Bỏ qua documentId={} do lỗi: {}", docId, e.getMessage());
+                                                return Mono.just(0L);
+                                            })
+                            )
+                            .count();
+                })
+                .doOnSuccess(n -> log.info("[Requeue] Đã chạy lại {} document từ DLQ", n));
+    }
+}
