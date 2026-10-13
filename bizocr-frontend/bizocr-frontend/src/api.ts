@@ -17,12 +17,14 @@ export class ApiError extends Error {
 async function req(path: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers)
     const token = getToken()
-    if (token) headers.set('Authorization', `Bearer ${token}`)
+    if (token && !path.startsWith('/auth')) headers.set('Authorization', `Bearer ${token}`)
     const res = await fetch(BASE + path, {...init, headers})
     if (!res.ok) {
-        if (res.status === 401 && !path.startsWith('/auth')) {
+        if (res.status === 401) {
             setToken(null)
-            window.dispatchEvent(new Event('logout'))
+            if (!path.startsWith('/auth')) {
+                window.dispatchEvent(new Event('logout'))
+            }
         }
         let msg = res.statusText
         try {
@@ -65,14 +67,16 @@ export const api = {
     get: (id: number) => json<Doc>(`/documents/${id}`),
     getDetail: (id: number) => json<DocumentDetailResponse>(`/documents/${id}/detail`),
     file: (id: number) => req(`/documents/${id}/file`).then((r) => r.blob()),
-    upload: (file: File) => {
+    upload: (file: File, batchId?: string) => {
         const fd = new FormData()
         fd.append('file', file)
+        const url = batchId ? `/documents/upload?batchId=${encodeURIComponent(batchId)}` : '/documents/upload'
         return json<{ documentId: number; fileName: string; status: string; message: string }>(
-            '/documents/upload',
+            url,
             {method: 'POST', body: fd},
         )
     },
+    getByBatch: (batchId: string) => json<Doc[]>(`/documents/batch/${encodeURIComponent(batchId)}`),
     uploadImage: (docId: number, side: 'FRONT' | 'BACK', file: File) => {
         const fd = new FormData()
         fd.append('file', file)

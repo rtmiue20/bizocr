@@ -90,6 +90,7 @@ public class OcrClientService {
                                             new IllegalStateException(
                                                     "OCR service trả HTTP "
                                                             + response.statusCode()
+                                                            + (body.isBlank() ? "" : ": " + body)
                                             )
                                     );
                                 })

@@ -28,17 +28,30 @@ public class UserService {
     private final CompanyFinderService companyFinderService;
 
     public Mono<User> register(RegisterRequest req) {
-        return userRepository.existsByUsername(req.getUsername())
+        if (req.getUsername() == null || req.getUsername().isBlank()) {
+            return Mono.error(new IllegalArgumentException("Tên đăng nhập không được để trống"));
+        }
+        if (req.getPassword() == null || req.getPassword().isBlank()) {
+            return Mono.error(new IllegalArgumentException("Mật khẩu không được để trống"));
+        }
+        if (req.getEmail() == null || req.getEmail().isBlank()) {
+            return Mono.error(new IllegalArgumentException("Email không được để trống"));
+        }
+
+        String username = req.getUsername().trim();
+        String email = req.getEmail().trim();
+
+        return userRepository.existsByUsername(username)
                 .flatMap(exists -> exists ? Mono.error(new IllegalArgumentException("Username đã tồn tại")) : Mono.just(false))
-                .then(userRepository.existsByEmail(req.getEmail()))
+                .then(userRepository.existsByEmail(email))
                 .flatMap(exists -> exists ? Mono.error(new IllegalArgumentException("Email đã tồn tại")) : Mono.just(false))
-                .then(resolveCompany(req.getTaxCode(), req.getCompanyName()))
+                .then(resolveCompany(req.getTaxCode(), req.getCompanyName(), username))
                 .flatMap(company -> {
                     User newUser = User.builder()
-                            .username(req.getUsername())
+                            .username(username)
                             .passwordHash(passwordEncoder.encode(req.getPassword()))
-                            .email(req.getEmail())
-                            .phoneNumber(req.getPhoneNumber())
+                            .email(email)
+                            .phoneNumber(req.getPhoneNumber() != null ? req.getPhoneNumber().trim() : null)
                             .role("REVIEWER") // Hardcode role vì lý do bảo mật
                             .companyId(company.getId())
                             .trustedLabeler(false)
@@ -49,15 +62,26 @@ public class UserService {
                 });
     }
 
-    private Mono<Company> resolveCompany(String taxCode, String companyName) {
-        String normalizedTaxCode = companyNameNormalizer.normalizeTaxCode(taxCode);
-        String normalizedName = companyNameNormalizer.normalize(companyName);
+    private Mono<Company> resolveCompany(String taxCode, String companyName, String username) {
+        String rawTax = (taxCode != null && !taxCode.isBlank()) ? companyNameNormalizer.normalizeTaxCode(taxCode) : null;
+        String normalizedTaxCode = (rawTax != null && !rawTax.isBlank()) ? rawTax : null;
+
+        String rawName = (companyName != null && !companyName.isBlank()) ? companyName.trim() : null;
+        String fallbackLegalName = rawName != null ? rawName : ("Cá nhân (" + username + ")");
+        String normalizedName = companyNameNormalizer.normalize(fallbackLegalName);
+        if (normalizedName == null || normalizedName.isBlank()) {
+            normalizedName = ("CANHAN " + username.toUpperCase());
+        }
+
+        final String finalNormalizedName = normalizedName;
+        final String finalLegalName = fallbackLegalName;
+        final String finalTaxCode = normalizedTaxCode;
 
         Mono<Company> createNewCompanyMono = Mono.defer(() -> {
             Company newCompany = Company.builder()
-                    .taxCode(normalizedTaxCode)
-                    .legalName(companyName)
-                    .normalizedName(normalizedName)
+                    .taxCode(finalTaxCode)
+                    .legalName(finalLegalName)
+                    .normalizedName(finalNormalizedName)
                     .verificationStatus(CompanyVerificationStatus.UNVERIFIED)
                     .verificationSource(CompanyVerificationSource.MANUAL_REGISTRATION)
                     .active(true)
@@ -67,14 +91,14 @@ public class UserService {
             return companyFinderService.saveOrFetch(newCompany);
         });
 
-        if (normalizedTaxCode != null && !normalizedTaxCode.isEmpty()) {
+        if (finalTaxCode != null) {
             // Có MST: tra theo MST trước (khớp duy nhất), fallback tên
-            return companyRepository.findByTaxCode(normalizedTaxCode)
-                    .switchIfEmpty(companyFinderService.findBestByName(normalizedName))
+            return companyRepository.findByTaxCode(finalTaxCode)
+                    .switchIfEmpty(companyFinderService.findBestByName(finalNormalizedName))
                     .switchIfEmpty(createNewCompanyMono);
         } else {
             // Không có MST: dùng CompanyFinderService chịu được nhiều dòng trùng
-            return companyFinderService.findBestByName(normalizedName)
+            return companyFinderService.findBestByName(finalNormalizedName)
                     .switchIfEmpty(createNewCompanyMono);
         }
     }

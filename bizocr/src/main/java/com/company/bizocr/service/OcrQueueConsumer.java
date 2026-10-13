@@ -40,15 +40,15 @@ public class OcrQueueConsumer {
     private final Path rootLocation = Paths.get("uploads").toAbsolutePath().normalize();
     private final AtomicBoolean batchRunning = new AtomicBoolean(false);
 
-    @Scheduled(fixedDelay = 1000)
+    @Scheduled(fixedDelay = 200)
     public void processQueue() {
         if (!batchRunning.compareAndSet(false, true)) {
             log.debug("Batch OCR trước vẫn đang chạy...");
             return;
         }
 
-        Flux.range(0, 10)
-                .flatMap(i -> redisTemplate.opsForList().rightPop(QUEUE_NAME), 10)
+        Flux.range(0, 20)
+                .flatMap(i -> redisTemplate.opsForList().rightPop(QUEUE_NAME), 20)
                 .filter(docId -> docId != null && !docId.isBlank())
                 .flatMap(docId -> {
                     long currentTime = System.currentTimeMillis();
@@ -74,7 +74,7 @@ public class OcrQueueConsumer {
                                                         .then(redisTemplate.opsForList().leftPush(DLQ_NAME, docId))
                                                         .then(Mono.empty())
                                         ),
-                        5
+                        10
                 )
                 .doFinally(signal -> batchRunning.set(false))
                 .subscribe(
@@ -119,8 +119,20 @@ public class OcrQueueConsumer {
                                             .remove(PROCESSING_ZSET_NAME, docId)
                                             .filter(count -> count > 0)
                                             .flatMap(count -> {
-                                                log.warn("[Sweeper] Đẩy lại job mồ côi #{} vào queue chính", docId);
-                                                return redisTemplate.opsForList().leftPush(QUEUE_NAME, docId);
+                                                log.warn("[Sweeper] Job mồ côi #{} phát hiện, reset DB → PENDING rồi đẩy lại queue", docId);
+                                                // Fix FSM mismatch: phải reset status về PENDING trước khi re-queue
+                                                // vì document có thể đang ở FAILED (terminal) → pipeline sẽ bị lỗi
+                                                // nếu không reset (giống logic requeueDocumentFromDlq)
+                                                return documentRepository.findById(Long.valueOf(docId))
+                                                        .flatMap(doc -> {
+                                                            doc.setStatus("PENDING");
+                                                            return documentRepository.save(doc);
+                                                        })
+                                                        .flatMap(doc -> redisTemplate.opsForList().leftPush(QUEUE_NAME, docId))
+                                                        .onErrorResume(e -> {
+                                                            log.error("[Sweeper] Không thể reset status documentId={}: {}", docId, e.getMessage());
+                                                            return Mono.empty();
+                                                        });
                                             })
                             )
                             .then();
@@ -136,12 +148,20 @@ public class OcrQueueConsumer {
                 .flatMap(documentRepository::findById)
                 .switchIfEmpty(Mono.error(
                         new IllegalStateException("Không tìm thấy document trong DB: " + docIdStr)))
-                .flatMap(record ->
-                        loadFileAsByteArrayResource(record.getFilePath())
-                                .flatMap(resource ->
-                                        pipelineOrchestrator.processDocument(resource, record)
-                                )
-                );
+                .flatMap(record -> {
+                    // Guard phòng thủ: bỏ qua document ở trạng thái terminal
+                    // Trường hợp này xảy ra nếu sweeper cũ (chưa fix) đã đẩy lại FAILED document,
+                    // hoặc có race-condition khiến document bị xử lý lại sau khi đã kết thúc.
+                    String status = record.getStatus();
+                    if ("FAILED".equals(status) || "APPROVED".equals(status) || "REJECTED_QUALITY".equals(status)) {
+                        log.warn("[Consumer] documentId={} bỏ qua vì trạng thái terminal={}", record.getId(), status);
+                        return Mono.just(record); // không xử lý, trả về nguyên trạng
+                    }
+                    return loadFileAsByteArrayResource(record.getFilePath())
+                            .flatMap(resource ->
+                                    pipelineOrchestrator.processDocument(resource, record)
+                            );
+                });
     }
 
     private Mono<Resource> loadFileAsByteArrayResource(String filePathStr) {
@@ -260,4 +280,4 @@ public class OcrQueueConsumer {
                 })
                 .doOnSuccess(n -> log.info("[Requeue] Đã chạy lại {} document từ DLQ", n));
     }
-}
+}

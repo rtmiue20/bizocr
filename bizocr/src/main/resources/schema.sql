@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS documents (
     contact_title         VARCHAR(255),
     industry              VARCHAR(255),
     approved_at           DATETIME,
+    batch_id              VARCHAR(64)  COMMENT 'UUID / ID định danh cho lô upload nhiều ảnh',
+    ready_at              DATETIME     COMMENT 'Thời điểm hoàn thành OCR pipeline sẵn sàng duyệt',
 
     -- ML / Continuous Learning fields (Từ Migration V2)
     predicted_fields_json JSON         COMMENT 'Snapshot dự đoán của model tại thời điểm bóc tách (chưa bị human ghi đè)',
@@ -130,6 +132,7 @@ CREATE TABLE IF NOT EXISTS documents (
     KEY idx_documents_issue_date (issue_date),
     KEY idx_documents_total_amount (total_amount),
     KEY idx_documents_cards (owner_company_id, status, approved_at),
+    KEY idx_documents_batch (owner_company_id, batch_id),
     -- Chỉ mục cho vòng lặp huấn luyện (Từ Migration V3)
     KEY idx_documents_training (training_eligible, training_batch_id),
     CONSTRAINT fk_documents_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL
@@ -309,6 +312,8 @@ CREATE TABLE IF NOT EXISTS document_images (
 -- Thêm cột nếu chưa tồn tại
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS industry VARCHAR(255);
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS approved_at DATETIME;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS batch_id VARCHAR(64);
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS ready_at DATETIME;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS industry VARCHAR(255);
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS approved_at DATETIME;
 

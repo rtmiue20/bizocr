@@ -126,6 +126,12 @@ public class Document {
     @Column("approved_at")
     private java.time.LocalDateTime approvedAt;
 
+    @Column("batch_id")
+    private String batchId;
+
+    @Column("ready_at")
+    private java.time.LocalDateTime readyAt;
+
     // ── ML / Continuous Learning fields ──────────────────────────────────────
 
     /**

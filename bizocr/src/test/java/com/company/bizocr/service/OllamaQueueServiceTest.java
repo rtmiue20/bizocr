@@ -45,6 +45,7 @@ class OllamaQueueServiceTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(redisTemplate.opsForList()).thenReturn(listOperations);
         when(chatClientBuilder.build()).thenReturn(chatClient);
         objectMapper = new ObjectMapper();
         queueService = new OllamaQueueService(

@@ -53,9 +53,11 @@ public class DocumentController {
     private final CurrentUserResolver currentUserResolver; // Inject Resolver chuẩn
 
     // 1. C - Create
-    // API Upload tập trung (Gắn thêm companyId khi tạo mới)
+    // API Upload tập trung (Gắn thêm companyId khi tạo mới, hỗ trợ batchId khi upload hàng loạt)
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Mono<UploadResponse> uploadDocument(@RequestPart("file") FilePart filePart) {
+    public Mono<UploadResponse> uploadDocument(
+            @RequestPart("file") FilePart filePart,
+            @RequestParam(value = "batchId", required = false) String batchId) {
 
         return currentUserResolver.getCurrentUser()
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
@@ -66,6 +68,7 @@ public class DocumentController {
                                     .filePath(savedFilePath)
                                     .status("PENDING")
                                     .ownerCompanyId(currentUser.companyId())
+                                    .batchId(batchId)
                                     .receivedAt(LocalDateTime.now().toString())
                                     .build();
 
@@ -100,6 +103,15 @@ public class DocumentController {
                         .status(savedRecord.getStatus())
                         .message("File đã được tiếp nhận và đưa vào hàng đợi xử lý ngầm (Redis Queue)")
                         .build());
+    }
+
+    // API Lấy danh sách chứng từ theo batchId (hỗ trợ hàng đợi duyệt lô liên tục)
+    @GetMapping("/batch/{batchId}")
+    public Mono<List<Document>> getDocumentsByBatch(@PathVariable String batchId) {
+        return currentUserResolver.getCurrentUser()
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Không tìm thấy thông tin xác thực")))
+                .flatMapMany(currentUser -> documentRepository.findByBatchIdAndOwnerCompanyId(batchId, currentUser.companyId()))
+                .collectList();
     }
 
     // API Upload ảnh bổ sung (VD: mặt sau namecard)

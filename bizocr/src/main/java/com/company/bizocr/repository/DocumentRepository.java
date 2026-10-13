@@ -99,7 +99,8 @@ public interface DocumentRepository extends ReactiveCrudRepository<Document, Lon
                    ocr_engine            = :ocrEngine,
                    company_id            = :companyId,
                    extracted_fields      = :extractedFields,
-                   predicted_fields_json = :extractedFields
+                   predicted_fields_json = :extractedFields,
+                   ready_at              = NOW()
              WHERE id = :id
                AND reviewed_by IS NULL
                AND status IN ('PROCESSING','OCR_DONE','CLASSIFIED','EXTRACTED','NEED_REVIEW','VALIDATED')
@@ -163,4 +164,7 @@ public interface DocumentRepository extends ReactiveCrudRepository<Document, Lon
     Mono<Document> findByIdAndOwnerCompanyId(Long id, Long ownerCompanyId);
 
     Flux<Document> findByStatusAndOwnerCompanyId(String status, Long ownerCompanyId);
+
+    @Query("SELECT * FROM documents WHERE owner_company_id = :ownerCompanyId AND batch_id = :batchId ORDER BY id ASC")
+    Flux<Document> findByBatchIdAndOwnerCompanyId(String batchId, Long ownerCompanyId);
 }

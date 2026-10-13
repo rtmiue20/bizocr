@@ -7,6 +7,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
+import org.springframework.security.oauth2.server.resource.web.server.authentication.ServerBearerTokenAuthenticationConverter;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -74,7 +75,7 @@ public class SecurityConfig {
                 // (OPTIONS) vẫn bị chặn trước khi tới controller.
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeExchange(exchanges -> exchanges
-                        // 1. Endpoint công khai & Đăng nhập
+                        // 1. Endpoint công khai & Đăng nhập — không cần JWT
                         .pathMatchers("/actuator/health", "/api/v1/public/**", "/api/v1/auth/**").permitAll()
 
                         // 2. Phân quyền RBAC cho duyệt chứng từ
@@ -93,9 +94,19 @@ public class SecurityConfig {
                 // QUAN TRỌNG: gắn jwtAuthenticationConverter() để map claim "roles" trong token
                 // sang GrantedAuthority có tiền tố ROLE_, nếu không hasAnyRole()/hasRole() sẽ luôn trả 403
                 // vì mặc định Spring chỉ đọc claim "scope"/"scp" và gắn tiền tố SCOPE_.
-                .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwtSpec ->
-                        jwtSpec.jwtAuthenticationConverter(jwtAuthenticationConverter())
-                ))
+                // ignoreBearerTokenFailure(true) — cho phép /auth/** nhận request có Bearer token hỏng
+                // mà không nổ 401, vì frontend có thể vô tình gửi token cũ khi đăng nhập lại.
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .jwt(jwtSpec -> jwtSpec.jwtAuthenticationConverter(jwtAuthenticationConverter()))
+                        .bearerTokenConverter(exchange -> {
+                            // Bỏ qua Bearer token cho /api/v1/auth/**, /api/v1/public/**, /actuator/** — tránh 401 khi token cũ/hỏng
+                            String path = exchange.getRequest().getPath().value();
+                            if (path.startsWith("/api/v1/auth/") || path.startsWith("/api/v1/public/") || path.startsWith("/actuator/")) {
+                                return Mono.empty();
+                            }
+                            return new ServerBearerTokenAuthenticationConverter().convert(exchange);
+                        })
+                )
                 .build();
     }
 

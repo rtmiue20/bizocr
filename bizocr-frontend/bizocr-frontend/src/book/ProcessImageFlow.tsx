@@ -11,10 +11,33 @@ interface Props {
   onFinishToDashboard: () => void
 }
 
+export interface BatchCardItem {
+  id: string
+  fileFront: File
+  previewFront: string
+  fileBack?: File
+  previewBack?: string
+  status: 'PENDING' | 'UPLOADING' | 'PROCESSING' | 'READY' | 'COMPLETED' | 'ERROR'
+  progress: number
+  docId?: number
+  doc?: Doc
+  docDetail?: DocumentDetailResponse
+  extractedFields?: Record<string, string>
+  errorMessage?: string
+}
+
 export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboard }: Props) {
   const [step, setStep] = useState<FlowStep>('INPUT_SOURCE')
   const [sourceMode, setSourceMode] = useState<'TAKE_PHOTO' | 'UPLOAD'>('TAKE_PHOTO')
   const [activeSide, setActiveSide] = useState<'FRONT' | 'BACK'>('FRONT')
+
+  // Chế độ Upload hàng loạt (Batch Mode)
+  const [isBatchMode, setIsBatchMode] = useState(false)
+  const [batchItems, setBatchItems] = useState<BatchCardItem[]>([])
+  const [batchId, setBatchId] = useState<string | null>(null)
+  const [activeBatchCardId, setActiveBatchCardId] = useState<string | null>(null)
+  const batchBackInputRef = useRef<HTMLInputElement>(null)
+  const [currentBackTargetCardId, setCurrentBackTargetCardId] = useState<string | null>(null)
 
   // Preview display switcher: dual, front, back
   const [previewViewMode, setPreviewViewMode] = useState<'dual' | 'front' | 'back'>('dual')
@@ -279,6 +302,285 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
     }
   }
 
+  // Input ref cho chọn nhiều file ảnh hàng loạt
+  const batchFileInputRef = useRef<HTMLInputElement>(null)
+  const isBatchRunningRef = useRef(false)
+
+  // Chọn nhiều file ảnh cùng lúc từ máy tính
+  const handleBatchFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
+    // Giới hạn dung lượng 15MB/file & lọc file ảnh
+    const validFiles = files.filter(f => f.type.startsWith('image/') && f.size <= 15 * 1024 * 1024)
+    if (validFiles.length === 0) {
+      alert('Vui lòng chọn các file định dạng ảnh (JPG, PNG, WEBP) dung lượng dưới 15MB.')
+      return
+    }
+
+    const newItems: BatchCardItem[] = validFiles.map((f, idx) => ({
+      id: `batch-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`,
+      fileFront: f,
+      previewFront: URL.createObjectURL(f),
+      status: 'PENDING',
+      progress: 0,
+    }))
+
+    setBatchItems((prev) => [...prev, ...newItems])
+    setIsBatchMode(true)
+    // Tự reset input value để có thể chọn tiếp
+    if (e.target) e.target.value = ''
+  }
+
+  // Xóa 1 ảnh khỏi lô
+  const removeBatchItem = (id: string) => {
+    setBatchItems((prev) => {
+      const target = prev.find(item => item.id === id)
+      if (target?.previewFront) URL.revokeObjectURL(target.previewFront)
+      if (target?.previewBack) URL.revokeObjectURL(target.previewBack)
+      const remaining = prev.filter(item => item.id !== id)
+      if (remaining.length === 0) {
+        setIsBatchMode(false)
+      }
+      return remaining
+    })
+  }
+
+  // Chọn ảnh mặt sau cho 1 item trong lô
+  const handleBatchBackFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file && currentBackTargetCardId) {
+      setBatchItems((prev) =>
+        prev.map((item) => {
+          if (item.id === currentBackTargetCardId) {
+            if (item.previewBack) URL.revokeObjectURL(item.previewBack)
+            return {
+              ...item,
+              fileBack: file,
+              previewBack: URL.createObjectURL(file),
+            }
+          }
+          return item
+        })
+      )
+    }
+    if (e.target) e.target.value = ''
+    setCurrentBackTargetCardId(null)
+  }
+
+  // Polling kết quả OCR cho 1 document cụ thể
+  const pollSingleDocument = async (id: number, maxAttempts = 120): Promise<Doc> => {
+    for (let attempts = 0; attempts < maxAttempts; attempts++) {
+      await new Promise((r) => setTimeout(r, 1000))
+      try {
+        const d = await api.get(id)
+        if (d.status === 'FAILED' || d.status === 'REJECTED' || d.status === 'REJECTED_QUALITY') {
+          throw new Error('OCR thất bại hoặc bị từ chối')
+        }
+        const rawFields = (d.extractedFields && d.extractedFields.trim() !== '' && d.extractedFields.trim() !== '{}')
+          ? d.extractedFields
+          : (d.predictedFieldsJson && d.predictedFieldsJson.trim() !== '' && d.predictedFieldsJson.trim() !== '{}')
+            ? d.predictedFieldsJson
+            : null
+        const isAiPending = Boolean(rawFields && rawFields.includes('PENDING_AI_WORKER'))
+        const inProgress = ['PENDING', 'PROCESSING', 'OCR_DONE', 'CLASSIFIED', 'EXTRACTED'].includes(d.status)
+
+        if (!inProgress && !isAiPending && rawFields) {
+          return d
+        }
+      } catch (err: any) {
+        if (attempts >= maxAttempts - 1) throw err
+      }
+    }
+    throw new Error('Timeout chờ OCR (quá 120s)')
+  }
+
+  // Khởi động Concurrency Pool = 3 để xử lý lô tài liệu
+  const runBatchPipeline = async () => {
+    const currentBatchId = `batch-${Date.now()}`
+    setBatchId(currentBatchId)
+    setStep('WAITING')
+    setIsProcessing(true)
+    setIsDone(false)
+    setErrorMessage(null)
+    isBatchRunningRef.current = true
+
+    // Clone danh sách items để mutate và track
+    const itemsToProcess = [...batchItems]
+    const CONCURRENCY = 3
+    let index = 0
+
+    const processItem = async (item: BatchCardItem) => {
+      // Cập nhật trạng thái UPLOADING
+      setBatchItems((prev) =>
+        prev.map((it) => (it.id === item.id ? { ...it, status: 'UPLOADING', progress: 20 } : it))
+      )
+
+      try {
+        // 1. Upload mặt trước với batchId
+        const uploadRes = await api.upload(item.fileFront, currentBatchId)
+        const docId = uploadRes.documentId
+
+        // Cập nhật docId và chuyển sang PROCESSING
+        setBatchItems((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, docId, status: 'PROCESSING', progress: 45 } : it))
+        )
+
+        // 2. Upload mặt sau nếu có
+        if (item.fileBack) {
+          try {
+            await api.uploadImage(docId, 'BACK', item.fileBack)
+          } catch (e) {
+            console.warn(`Lỗi upload mặt sau item ${item.id}:`, e)
+          }
+        }
+
+        // 3. Polling ngầm cho document này
+        const completedDoc = await pollSingleDocument(docId)
+        const extracted = extractFieldsFromDoc(completedDoc) || {}
+        let detail: DocumentDetailResponse | undefined
+        try {
+          detail = await api.getDetail(docId)
+        } catch {
+          // ignore
+        }
+
+        // Cập nhật trạng thái READY
+        setBatchItems((prev) =>
+          prev.map((it) =>
+            it.id === item.id
+              ? {
+                  ...it,
+                  status: 'READY',
+                  progress: 100,
+                  doc: completedDoc,
+                  docDetail: detail,
+                  extractedFields: extracted,
+                }
+              : it
+          )
+        )
+      } catch (err: any) {
+        setBatchItems((prev) =>
+          prev.map((it) =>
+            it.id === item.id
+              ? {
+                  ...it,
+                  status: 'ERROR',
+                  progress: 100,
+                  errorMessage: err?.message || 'Lỗi bóc tách',
+                }
+              : it
+          )
+        )
+      }
+    }
+
+    // Chạy concurrency worker pool
+    const workers = Array.from({ length: CONCURRENCY }).map(async () => {
+      while (index < itemsToProcess.length && isBatchRunningRef.current) {
+        const item = itemsToProcess[index++]
+        if (item) {
+          await processItem(item)
+        }
+      }
+    })
+
+    await Promise.all(workers)
+    setIsProcessing(false)
+  }
+
+  // Tự động nạp item đầu tiên sẵn sàng vào màn hình Duyệt (RESULT_EDIT)
+  useEffect(() => {
+    if (isBatchMode && step === 'WAITING') {
+      const readyItem = batchItems.find((it) => it.status === 'READY')
+      if (readyItem && (!activeBatchCardId || !batchItems.find(it => it.id === activeBatchCardId && it.status === 'READY'))) {
+        loadBatchItemForReview(readyItem)
+      }
+    }
+  }, [batchItems, isBatchMode, step, activeBatchCardId])
+
+  // Nạp 1 card trong lô vào form đối soát
+  const loadBatchItemForReview = (item: BatchCardItem) => {
+    setActiveBatchCardId(item.id)
+    if (item.docId) setDocId(item.docId)
+    if (item.doc) setDoc(item.doc)
+    if (item.docDetail) setDocDetail(item.docDetail)
+    if (item.extractedFields) {
+      setEditFields(item.extractedFields)
+    }
+    setFrontPreview(item.previewFront)
+    setBackPreview(item.previewBack || null)
+    setStep('RESULT_EDIT')
+  }
+
+  // Bỏ qua item hiện tại (đưa về cuối danh sách hoặc chọn item ready tiếp theo)
+  const handleSkipCurrentBatchItem = () => {
+    if (!isBatchMode || !activeBatchCardId) return
+    const otherReady = batchItems.find((it) => it.id !== activeBatchCardId && it.status === 'READY')
+    if (otherReady) {
+      loadBatchItemForReview(otherReady)
+    } else {
+      // Nếu chưa có item nào khác sẵn sàng, tạm quay lại màn hình WAITING
+      setStep('WAITING')
+    }
+  }
+
+  // Duyệt và tự động chuyển sang item tiếp theo trong lô
+  const handleConfirmAndNextBatchItem = async () => {
+    if (!isBatchMode || !activeBatchCardId) {
+      await handleConfirmSave()
+      return
+    }
+
+    setIsConfirming(true)
+    try {
+      const currentItem = batchItems.find((it) => it.id === activeBatchCardId)
+      if (currentItem?.docId) {
+        const payloadFields = {
+          ...editFields,
+          notes: notes || undefined,
+          folder: selectedFolder,
+          tags: tags.join(','),
+          review_status: 'CONFIRMED_BY_USER',
+          approvedType: doc?.documentType || 'NAMECARD',
+        }
+        await api.update(currentItem.docId, {
+          status: 'NEED_REVIEW',
+          extractedFields: JSON.stringify(payloadFields),
+        })
+        await api.approve(currentItem.docId, payloadFields)
+
+        // Đánh dấu item này đã COMPLETED
+        setBatchItems((prev) =>
+          prev.map((it) => (it.id === activeBatchCardId ? { ...it, status: 'COMPLETED' } : it))
+        )
+      }
+
+      // Tìm item READY tiếp theo để duyệt
+      const nextItem = batchItems.find((it) => it.id !== activeBatchCardId && it.status === 'READY')
+      if (nextItem) {
+        loadBatchItemForReview(nextItem)
+      } else {
+        // Kiểm tra xem còn item nào đang PROCESSING / PENDING không
+        const remainingWorking = batchItems.filter(
+          (it) => it.id !== activeBatchCardId && (it.status === 'PROCESSING' || it.status === 'UPLOADING' || it.status === 'PENDING')
+        )
+        if (remainingWorking.length > 0) {
+          // Còn ảnh đang xử lý dở -> đưa về màn hình WAITING với Skeleton
+          setStep('WAITING')
+        } else {
+          // Toàn bộ lô đã hoàn thành! Chuyển sang màn hình COMPLETE
+          setStep('RESULT_COMPLETE')
+        }
+      }
+    } catch (err: any) {
+      alert(err.message || 'Lỗi khi lưu danh thiếp')
+    } finally {
+      setIsConfirming(false)
+    }
+  }
+
   // Chọn file từ máy tính
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, side: 'FRONT' | 'BACK') => {
     const file = e.target.files?.[0]
@@ -312,6 +614,12 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
 
   // TIẾN HÀNH XỬ LÝ (Từ Step 1 -> Step 2: Xác nhận chất lượng ảnh)
   const handleProceedToInspection = async () => {
+    if (isBatchMode && batchItems.length > 0) {
+      // Nếu ở chế độ Batch, bắt đầu chạy Concurrency Pool pipeline
+      runBatchPipeline()
+      return
+    }
+
     // Nếu đang mở camera nhưng chưa bấm shutter, tự chụp frame hiện tại
     if (!frontFile && cameraActive && videoRef.current && canvasRef.current) {
       const video = videoRef.current
@@ -445,7 +753,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
   // Polling kết quả OCR — Chỉ hoàn tất khi AI thực sự xử lý xong
   const pollForOcrResult = (id: number) => {
     let attempts = 0
-    const maxAttempts = 60 // 60 * 2s = 120s tối đa
+    const maxAttempts = 150 // 150 * 800ms = 120s tối đa
     const interval = setInterval(async () => {
       attempts++
       try {
@@ -525,7 +833,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
           setIsDone(false)
         }
       }
-    }, 2000)
+    }, 800)
   }
 
   // Xác nhận CONFIRM lưu sổ
@@ -571,6 +879,22 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
         accept="image/*"
         className="hidden"
         onChange={(e) => handleFileChange(e, 'BACK')}
+      />
+      {/* Input hỗ trợ tải hàng loạt nhiều ảnh một lúc */}
+      <input
+        ref={batchFileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={handleBatchFilesSelected}
+      />
+      <input
+        ref={batchBackInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleBatchBackFileSelected}
       />
       <canvas ref={canvasRef} className="hidden" />
 
@@ -666,21 +990,23 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                     <button
                       type="button"
                       onClick={() => {
+                        setIsBatchMode(false)
                         setSourceMode('TAKE_PHOTO')
                         startCamera()
                       }}
                       className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        sourceMode === 'TAKE_PHOTO'
+                        !isBatchMode && sourceMode === 'TAKE_PHOTO'
                           ? 'bg-white text-[#3525cd] shadow-sm'
                           : 'text-[#464555] hover:text-[#1c1c19]'
                       }`}
                     >
                       <span className="material-symbols-outlined text-[17px]">photo_camera</span>
-                      <span>Take Photo (Camera)</span>
+                      <span>Chụp ảnh (Camera)</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => {
+                        setIsBatchMode(false)
                         setSourceMode('UPLOAD')
                         stopCamera()
                         if (activeSide === 'FRONT') {
@@ -690,18 +1016,174 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                         }
                       }}
                       className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        sourceMode === 'UPLOAD'
+                        !isBatchMode && sourceMode === 'UPLOAD'
                           ? 'bg-white text-[#3525cd] shadow-sm'
                           : 'text-[#464555] hover:text-[#1c1c19]'
                       }`}
                     >
                       <span className="material-symbols-outlined text-[17px]">upload_file</span>
-                      <span>Upload (Tải file)</span>
+                      <span>Tải 1 ảnh</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        stopCamera()
+                        batchFileInputRef.current?.click()
+                      }}
+                      className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        isBatchMode
+                          ? 'bg-[#4f46e5] text-white shadow-sm'
+                          : 'text-[#464555] hover:text-[#1c1c19] hover:bg-white/60'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[17px]">collections</span>
+                      <span>Tải hàng loạt (Nhiều ảnh)</span>
+                      {batchItems.length > 0 && (
+                        <span className="ml-1 px-1.5 py-0.2 bg-amber-400 text-slate-900 text-[10px] rounded-full font-black">
+                          {batchItems.length}
+                        </span>
+                      )}
                     </button>
                   </div>
                 </div>
 
-                {/* Tactile Camera Viewfinder / Preview Desk Mat */}
+                {/* Khi ở chế độ BATCH UPLOAD: Hiển thị giao diện danh sách lô nhiều ảnh */}
+                {isBatchMode && batchItems.length > 0 ? (
+                  <div className="relative w-full rounded-xl bg-[#fcf9f4] border-2 border-dashed border-[#c7c4d8] p-4 flex flex-col gap-4 min-h-[380px]">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#ebe8e3] pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[#3525cd] text-[22px]">inventory_2</span>
+                        <div>
+                          <h3 className="text-sm font-extrabold text-[#1c1c19]">
+                            Danh sách chứng từ trong lô ({batchItems.length} thẻ)
+                          </h3>
+                          <p className="text-[11px] text-[#464555]">
+                            Mỗi ảnh là một chứng từ/danh thiếp độc lập. Có thể tải thêm mặt sau tùy chọn cho từng tấm.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => batchFileInputRef.current?.click()}
+                          className="px-3 py-1.5 rounded-xl bg-white hover:bg-[#ebe8e3] text-[#3525cd] text-xs font-bold border border-[#c7c4d8]/60 shadow-sm flex items-center gap-1 cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">add_photo_alternate</span>
+                          <span>+ Thêm ảnh vào lô</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            batchItems.forEach(it => {
+                              if (it.previewFront) URL.revokeObjectURL(it.previewFront)
+                              if (it.previewBack) URL.revokeObjectURL(it.previewBack)
+                            })
+                            setBatchItems([])
+                            setIsBatchMode(false)
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl text-red-600 hover:bg-red-50 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">delete_sweep</span>
+                          <span>Xóa tất cả</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Lưới danh sách các thẻ chứng từ trong lô */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[480px] overflow-y-auto pr-1">
+                      {batchItems.map((item, idx) => (
+                        <div
+                          key={item.id}
+                          className="bg-white rounded-xl border border-[#c7c4d8]/60 p-3 shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-3 relative group"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-extrabold text-[#464555] bg-[#f0ede9] px-2 py-0.5 rounded-md">
+                              #{idx + 1}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                                <span className="material-symbols-outlined text-[12px]">verified</span>
+                                98% Nét
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeBatchItem(item.id)}
+                                className="p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                                title="Xóa thẻ này"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">close</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Thumbnails trước / sau */}
+                          <div className="grid grid-cols-2 gap-2">
+                            {/* Mặt trước */}
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] font-bold text-[#1c1c19] uppercase">Mặt trước</span>
+                              <div className="relative aspect-[90/54] rounded-lg overflow-hidden border border-[#ebe8e3] bg-slate-900">
+                                <img
+                                  src={item.previewFront}
+                                  alt={`Front ${idx + 1}`}
+                                  className="w-full h-full object-contain"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Mặt sau (Tùy chọn) */}
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-[#464555] uppercase">Mặt sau</span>
+                                {item.fileBack && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (item.previewBack) URL.revokeObjectURL(item.previewBack)
+                                      setBatchItems(prev =>
+                                        prev.map(it => it.id === item.id ? { ...it, fileBack: undefined, previewBack: undefined } : it)
+                                      )
+                                    }}
+                                    className="text-[9px] text-red-600 hover:underline"
+                                  >
+                                    Bỏ
+                                  </button>
+                                )}
+                              </div>
+                              {item.previewBack ? (
+                                <div className="relative aspect-[90/54] rounded-lg overflow-hidden border border-[#ebe8e3] bg-slate-900">
+                                  <img
+                                    src={item.previewBack}
+                                    alt={`Back ${idx + 1}`}
+                                    className="w-full h-full object-contain"
+                                  />
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCurrentBackTargetCardId(item.id)
+                                    batchBackInputRef.current?.click()
+                                  }}
+                                  className="aspect-[90/54] rounded-lg border border-dashed border-[#c7c4d8] hover:border-[#3525cd] bg-[#f6f3ee] hover:bg-white flex flex-col items-center justify-center gap-0.5 text-[#3525cd] transition-all cursor-pointer"
+                                  title="Thêm ảnh mặt sau cho thẻ này"
+                                >
+                                  <span className="material-symbols-outlined text-[16px]">add_photo_alternate</span>
+                                  <span className="text-[9px] font-bold">+ Mặt sau</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="text-[11px] text-[#464555] truncate font-medium border-t border-slate-100 pt-1.5 flex items-center justify-between">
+                            <span className="truncate max-w-[140px]">{item.fileFront.name}</span>
+                            <span className="text-[10px] text-slate-400">{(item.fileFront.size / 1024).toFixed(0)} KB</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                /* Tactile Camera Viewfinder / Preview Desk Mat */
                 <div className="relative w-full rounded-xl bg-[#dcdad5] overflow-hidden shadow-inner p-3 sm:p-6 lg:p-8 flex items-center justify-center min-h-[360px] sm:min-h-[420px]">
                   <div className="absolute inset-0 bg-[radial-gradient(#c7c4d8_1px,transparent_1px)] [background-size:20px_20px] opacity-40 pointer-events-none"></div>
 
@@ -890,6 +1372,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                     </button>
                   </div>
                 </div>
+                )}
 
                 {/* Shutter Deck */}
                 <div className="mt-4 pt-2 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -1113,17 +1596,25 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
               <div className="bg-[#f6f3ee] rounded-2xl p-4 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-[#1c1c19]">Trạng thái tệp quét</span>
-                  <span className="text-xs text-[#3525cd] font-bold">1 mặt đã sẵn sàng</span>
+                  <span className="text-xs text-[#3525cd] font-bold">
+                    {isBatchMode ? `${batchItems.length} thẻ trong lô` : '1 mặt đã sẵn sàng'}
+                  </span>
                 </div>
                 <div className="flex items-center gap-3 bg-white p-2.5 rounded-xl shadow-sm border border-[#c7c4d8]/40">
                   <div className="w-12 h-8 rounded-lg bg-[#ebe8e3] overflow-hidden shrink-0 flex items-center justify-center text-[#3525cd] font-bold text-xs border border-[#c7c4d8]/30">
-                    90×54
+                    {isBatchMode ? `${batchItems.length}x` : '90×54'}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-[#1c1c19] truncate">
-                      {frontFile ? frontFile.name : 'SCAN_CARD_2025_001.JPG'}
+                      {isBatchMode
+                        ? `Lô hàng loạt: ${batchItems.length} tài liệu`
+                        : (frontFile ? frontFile.name : 'SCAN_CARD_2025_001.JPG')}
                     </p>
-                    <p className="text-[11px] text-[#464555]">2.4 MB • 300 DPI • Tự căn biên</p>
+                    <p className="text-[11px] text-[#464555]">
+                      {isBatchMode
+                        ? 'Xử lý song song tối đa 3 ảnh • Không nghẽn CPU'
+                        : '2.4 MB • 300 DPI • Tự căn biên'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1617,14 +2108,95 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                 <div className="flex items-center gap-2 text-[#464555] text-xs font-semibold uppercase tracking-wider">
                   <span className="material-symbols-outlined text-[15px] text-[#3525cd]">radar</span>
                   <span>Quy trình số hoá danh thiếp</span>
+                  {isBatchMode && (
+                    <span className="text-[#3525cd] font-bold">• Xử lý hàng loạt ({batchItems.length} tài liệu)</span>
+                  )}
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-[#1c1c19] tracking-tight leading-tight">
-                  Waiting.....
+                  {isBatchMode ? 'Đang Xử Lý Lô Tài Liệu...' : 'Waiting.....'}
                 </h1>
-                <p className="text-sm text-[#464555] font-medium">Đang trích xuất văn bản từ danh thiếp...</p>
+                <p className="text-sm text-[#464555] font-medium">
+                  {isBatchMode
+                    ? 'Hệ thống đang chạy tối đa 3 tiến trình song song trên CPU. Thẻ hoàn tất đầu tiên sẽ tự động mở màn hình duyệt ngay lập tức!'
+                    : 'Đang trích xuất văn bản từ danh thiếp...'}
+                </p>
               </div>
 
-              {/* Main card: laser-scan card preview + progress */}
+              {/* Nếu là Batch Mode: Hiển thị bảng tiến trình từng thẻ trong lô */}
+              {isBatchMode && batchItems.length > 0 ? (
+                <div className="bg-white rounded-2xl border border-[#c7c4d8]/50 shadow-md p-6 flex flex-col gap-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <span className="text-xs font-extrabold text-[#1c1c19] uppercase tracking-wider">
+                      Tiến độ xử lý lô: {batchItems.filter(it => it.status === 'READY' || it.status === 'COMPLETED').length}/{batchItems.length} hoàn thành
+                    </span>
+                    <span className="text-xs font-bold text-[#3525cd] flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-[#3525cd] animate-ping" />
+                      Worker Concurrency Pool: 3
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {batchItems.map((item, idx) => (
+                      <div
+                        key={item.id}
+                        className={`p-3 rounded-xl border flex flex-col gap-2 transition-all ${
+                          item.status === 'READY'
+                            ? 'border-emerald-300 bg-emerald-50/50 shadow-sm'
+                            : item.status === 'COMPLETED'
+                              ? 'border-slate-200 bg-slate-50 opacity-70'
+                              : item.status === 'PROCESSING' || item.status === 'UPLOADING'
+                                ? 'border-indigo-300 bg-indigo-50/40 shadow-sm animate-pulse'
+                                : item.status === 'ERROR'
+                                  ? 'border-red-200 bg-red-50 text-red-700'
+                                  : 'border-slate-200 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs font-bold">
+                          <span>Thẻ #{idx + 1}</span>
+                          {item.status === 'READY' && (
+                            <span className="text-emerald-700 text-[10px] font-black bg-emerald-100 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                              <span className="material-symbols-outlined text-[12px]">check_circle</span> SẴN SÀNG
+                            </span>
+                          )}
+                          {item.status === 'COMPLETED' && (
+                            <span className="text-slate-600 text-[10px] font-black bg-slate-200 px-1.5 py-0.5 rounded-full">
+                              ĐÃ DUYỆT
+                            </span>
+                          )}
+                          {(item.status === 'PROCESSING' || item.status === 'UPLOADING') && (
+                            <span className="text-indigo-700 text-[10px] font-black bg-indigo-100 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                              <span className="material-symbols-outlined text-[12px] animate-spin">sync</span> {item.status === 'UPLOADING' ? 'ĐANG TẢI' : 'ĐANG OCR'}
+                            </span>
+                          )}
+                          {item.status === 'PENDING' && (
+                            <span className="text-slate-400 text-[10px] font-bold">CHỜ LƯỢT</span>
+                          )}
+                          {item.status === 'ERROR' && (
+                            <span className="text-red-600 text-[10px] font-bold">LỖI</span>
+                          )}
+                        </div>
+
+                        <div className="aspect-[90/54] rounded-lg bg-slate-900 overflow-hidden relative border border-slate-200">
+                          <img src={item.previewFront} alt={`Card ${idx + 1}`} className="w-full h-full object-contain" />
+                          {item.status === 'READY' && (
+                            <button
+                              type="button"
+                              onClick={() => loadBatchItemForReview(item)}
+                              className="absolute inset-0 bg-indigo-900/60 hover:bg-indigo-900/80 text-white font-extrabold text-xs flex items-center justify-center gap-1 backdrop-blur-xs transition-all cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">edit_document</span>
+                              <span>Duyệt ngay</span>
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="text-[11px] text-slate-500 truncate">{item.fileFront.name}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+              /* Main card: laser-scan card preview + progress */
               <div className="bg-white rounded-2xl border border-[#c7c4d8]/50 shadow-[0_4px_24px_rgba(92,79,61,0.07)] p-6 sm:p-8 flex flex-col gap-6">
                 {/* Viewfinder mock card */}
                 <div className="relative w-full aspect-[90/54] bg-[#1E1B4B] rounded-2xl overflow-hidden shadow-2xl border-2 border-[#3525cd]/40 flex items-center justify-center">
@@ -1690,6 +2262,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                   ))}
                 </div>
               </div>
+              )}
 
               {/* Lock-screen caution alert */}
               <div className="flex items-start gap-3 bg-[#ffdad6]/50 border border-[#ffdad6] rounded-xl px-4 py-3">
@@ -1884,6 +2457,78 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
       ───────────────────────────────────────────────────────────── */}
       {step === 'RESULT_EDIT' && (
         <div className="flex flex-col gap-6 animate-in fade-in">
+          {/* DẢI REVIEW QUEUE STRIP (Khi ở chế độ Batch) */}
+          {isBatchMode && batchItems.length > 0 && (
+            <div className="bg-white rounded-2xl border border-indigo-100 p-4 shadow-sm flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[#3525cd] text-[20px]">queue</span>
+                  <span className="text-xs font-extrabold text-[#1c1c19] uppercase tracking-wide">
+                    Hàng đợi duyệt liên tục: {batchItems.filter(it => it.status === 'COMPLETED').length}/{batchItems.length} đã hoàn tất
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-slate-500 font-medium">Bấm vào ảnh để chuyển thẻ duyệt</span>
+                </div>
+              </div>
+
+              {/* Dải thumbnail thanh trượt ngang */}
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 pt-1">
+                {batchItems.map((item, idx) => {
+                  const isActive = item.id === activeBatchCardId
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => {
+                        if (item.status === 'READY' || item.status === 'COMPLETED') {
+                          loadBatchItemForReview(item)
+                        }
+                      }}
+                      className={`shrink-0 w-28 rounded-xl border p-1.5 flex flex-col gap-1 transition-all cursor-pointer relative ${
+                        isActive
+                          ? 'border-[#3525cd] bg-indigo-50/70 shadow-md ring-2 ring-[#3525cd]/30'
+                          : item.status === 'COMPLETED'
+                            ? 'border-slate-200 bg-slate-50 opacity-60'
+                            : item.status === 'READY'
+                              ? 'border-emerald-300 bg-emerald-50/40 hover:border-emerald-400'
+                              : 'border-slate-200 bg-slate-50/50 cursor-not-allowed opacity-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-[10px] font-bold">
+                        <span>#{idx + 1}</span>
+                        {item.status === 'COMPLETED' && (
+                          <span className="text-slate-600 material-symbols-outlined text-[13px]">check</span>
+                        )}
+                        {item.status === 'READY' && (
+                          <span className="text-emerald-700 material-symbols-outlined text-[13px]">verified</span>
+                        )}
+                        {(item.status === 'PROCESSING' || item.status === 'UPLOADING') && (
+                          <span className="text-indigo-600 material-symbols-outlined text-[13px] animate-spin">sync</span>
+                        )}
+                        {item.status === 'ERROR' && (
+                          <span className="text-red-600 material-symbols-outlined text-[13px]">error</span>
+                        )}
+                      </div>
+
+                      <div className="aspect-[90/54] rounded-md overflow-hidden bg-slate-900 border border-slate-200 relative">
+                        <img src={item.previewFront} alt={`Card ${idx + 1}`} className="w-full h-full object-contain" />
+                        {isActive && (
+                          <div className="absolute inset-0 bg-[#3525cd]/20 flex items-center justify-center">
+                            <span className="text-[9px] font-black text-white bg-[#3525cd] px-1.5 py-0.5 rounded shadow">ĐANG SỬA</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="text-[9px] text-slate-500 truncate font-semibold">
+                        {item.status === 'READY' ? 'Sẵn sàng' : item.status === 'COMPLETED' ? 'Đã duyệt' : item.status === 'PROCESSING' ? 'Đang OCR' : 'Chờ...'}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-extrabold text-[#1E1B4B]">
               RESULT: Xác Thực &amp; Chỉnh Sửa Thông Tin
@@ -1908,6 +2553,79 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
             </div>
           </div>
 
+          {/* ── BANNER CẢNH BÁO THIẾU THÔNG TIN ────────────────────────────── */}
+          {(() => {
+            const REQUIRED_FIELDS: { key: string; label: string }[] = [
+              { key: 'company_name',   label: 'Tên công ty' },
+              { key: 'contact_name',   label: 'Tên đại diện' },
+              { key: 'company_phone',  label: 'SĐT công ty' },
+              { key: 'phone',          label: 'SĐT cá nhân' },
+              { key: 'website',        label: 'Website' },
+              { key: 'contact_title',  label: 'Chức vị' },
+              { key: 'company_email',  label: 'Email công ty' },
+              { key: 'email',          label: 'Email cá nhân' },
+            ]
+
+            const missingFields = REQUIRED_FIELDS.filter(
+              (f) => !editFields[f.key] || editFields[f.key].trim() === ''
+            )
+
+            if (missingFields.length === 0) return null
+
+            return (
+              <div
+                role="alert"
+                className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-2xl px-4 py-3.5 shadow-sm animate-in fade-in slide-in-from-top-2"
+              >
+                {/* Icon */}
+                <span className="material-symbols-outlined text-amber-500 text-[22px] shrink-0 mt-0.5">
+                  warning
+                </span>
+
+                {/* Nội dung */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-extrabold text-amber-800 mb-1.5">
+                    ⚠️ Thiếu thông tin — cần bổ sung trước khi lưu
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {missingFields.map((f) => (
+                      <span
+                        key={f.key}
+                        className="inline-flex items-center gap-1 bg-amber-100 border border-amber-300 text-amber-900 text-[11px] font-bold px-2 py-0.5 rounded-full"
+                      >
+                        <span className="material-symbols-outlined text-[13px] text-amber-600">
+                          error
+                        </span>
+                        {f.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Nút cuộn xuống trường đầu tiên thiếu */}
+                <button
+                  type="button"
+                  title="Nhảy đến trường cần điền"
+                  onClick={() => {
+                    const firstKey = missingFields[0]?.key
+                    if (!firstKey) return
+                    const el = document.querySelector<HTMLInputElement>(
+                      `input[data-field="${firstKey}"]`
+                    )
+                    if (el) {
+                      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                      el.focus()
+                    }
+                  }}
+                  className="shrink-0 flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-200 hover:bg-amber-300 px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[14px]">edit</span>
+                  Điền ngay
+                </button>
+              </div>
+            )
+          })()}
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Cột trái: Bảng Key-Value */}
             <div className="lg:col-span-7 flex flex-col gap-4">
@@ -1929,6 +2647,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                         <span className="text-xs font-bold text-[#464555] w-1/3">Họ và tên:</span>
                         <input
                           type="text"
+                          data-field="contact_name"
                           value={editFields.contact_name}
                           onChange={(e) => setEditFields({ ...editFields, contact_name: e.target.value })}
                           className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm font-bold text-[#1E1B4B] focus:border-[#3525cd] outline-none"
@@ -1939,6 +2658,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                         <span className="text-xs font-bold text-[#464555] w-1/3">Chức danh:</span>
                         <input
                           type="text"
+                          data-field="contact_title"
                           value={editFields.contact_title}
                           onChange={(e) => setEditFields({ ...editFields, contact_title: e.target.value })}
                           className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm font-semibold outline-none"
@@ -1949,6 +2669,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                         <span className="text-xs font-bold text-[#464555] w-1/3">SĐT cá nhân:</span>
                         <input
                           type="text"
+                          data-field="phone"
                           value={editFields.phone}
                           onChange={(e) => setEditFields({ ...editFields, phone: e.target.value })}
                           placeholder="Di động / Mobile (09x, 03x, 07x...)"
@@ -1960,6 +2681,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                         <span className="text-xs font-bold text-[#464555] w-1/3">Email cá nhân:</span>
                         <input
                           type="email"
+                          data-field="email"
                           value={editFields.email}
                           onChange={(e) => setEditFields({ ...editFields, email: e.target.value })}
                           placeholder="Email cá nhân (gmail, yahoo, outlook...)"
@@ -1981,6 +2703,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                         <span className="text-xs font-bold text-[#464555] w-1/3">Tên công ty:</span>
                         <input
                           type="text"
+                          data-field="company_name"
                           value={editFields.company_name}
                           onChange={(e) => setEditFields({ ...editFields, company_name: e.target.value })}
                           className="flex-1 rounded-xl border border-[#c7c4d8] bg-white px-3 py-1.5 text-xs sm:text-sm font-bold text-[#1E1B4B] outline-none"
@@ -2002,6 +2725,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                         <span className="text-xs font-bold text-[#464555] w-1/3">SĐT công ty:</span>
                         <input
                           type="text"
+                          data-field="company_phone"
                           value={editFields.company_phone}
                           onChange={(e) => setEditFields({ ...editFields, company_phone: e.target.value })}
                           placeholder="Tel / Điện thoại bàn / Hotline"
@@ -2013,6 +2737,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                         <span className="text-xs font-bold text-[#464555] w-1/3">Email công ty:</span>
                         <input
                           type="email"
+                          data-field="company_email"
                           value={editFields.company_email}
                           onChange={(e) => setEditFields({ ...editFields, company_email: e.target.value })}
                           placeholder="Email tên miền riêng (info@, ceo@...)"
@@ -2045,6 +2770,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                         <span className="text-xs font-bold text-[#464555] w-1/3">Website:</span>
                         <input
                           type="text"
+                          data-field="website"
                           value={editFields.website}
                           onChange={(e) => setEditFields({ ...editFields, website: e.target.value })}
                           placeholder="https://..."
@@ -2066,25 +2792,61 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 pt-4 border-t border-[#f0ede9]">
-                  <button
-                    type="button"
-                    onClick={() => setStep('INPUT_SOURCE')}
-                    className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-2xl border-2 border-[#c7c4d8] text-xs font-bold text-[#464555] hover:bg-[#ebe8e3] cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">photo_camera</span>
-                    <span>EDIT IMG (Chụp lại)</span>
-                  </button>
+                <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-[#f0ede9]">
+                  {isBatchMode ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleSkipCurrentBatchItem}
+                        className="px-4 py-3 rounded-2xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer flex items-center gap-1.5"
+                        title="Đẩy thẻ này xuống sau và duyệt thẻ khác"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">skip_next</span>
+                        <span>Bỏ qua</span>
+                      </button>
 
-                  <button
-                    type="button"
-                    onClick={handleConfirmSave}
-                    disabled={isConfirming}
-                    className="flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-[#4f46e5] text-xs font-extrabold text-white shadow-lg hover:opacity-95 cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">verified</span>
-                    <span>CONFIRM (Xác nhận lưu)</span>
-                  </button>
+                      <button
+                        type="button"
+                        onClick={() => setStep('INPUT_SOURCE')}
+                        className="px-4 py-3 rounded-2xl border border-[#c7c4d8] text-xs font-bold text-[#464555] hover:bg-[#ebe8e3] cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">grid_view</span>
+                        <span>Xem lô ảnh</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleConfirmAndNextBatchItem}
+                        disabled={isConfirming}
+                        className="flex-1 min-w-[200px] flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-[#4f46e5] hover:bg-[#3525cd] text-xs font-extrabold text-white shadow-lg cursor-pointer transition-all"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                        <span>DUYỆT &amp; TIẾP THEO</span>
+                        <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setStep('INPUT_SOURCE')}
+                        className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-2xl border-2 border-[#c7c4d8] text-xs font-bold text-[#464555] hover:bg-[#ebe8e3] cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">photo_camera</span>
+                        <span>EDIT IMG (Chụp lại)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleConfirmSave}
+                        disabled={isConfirming}
+                        className="flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-[#4f46e5] text-xs font-extrabold text-white shadow-lg hover:opacity-95 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">verified</span>
+                        <span>CONFIRM (Xác nhận lưu)</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -2338,6 +3100,7 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
         const fax          = editFields.fax           || ''
         const address      = editFields.address       || ''
         const website      = editFields.website       || ''
+        const industry     = editFields.industry      || ''
 
         return (
           <div className="flex flex-col gap-6 animate-in fade-in w-full">
@@ -2625,87 +3388,32 @@ export default function ProcessImageFlow({ onBackToDashboard, onFinishToDashboar
                     <div className="bg-[#f6f3ee] p-4 rounded-xl flex flex-col gap-1.5">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-[#464555]">Mã số thuế (Tax Code)</span>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-bold text-[#1c1c19] font-mono tracking-wider">{tax}</span>
-                        <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-[#d5e3fd] text-[#57657b] font-bold">
-                          <span className="material-symbols-outlined text-[13px]">gavel</span>Tổng cục Thuế xác nhận
-                        </span>
+                        <span className="text-sm font-bold text-[#1c1c19] font-mono tracking-wider">{tax || '—'}</span>
+                        {tax && (
+                          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-[#d5e3fd] text-[#57657b] font-bold">
+                            <span className="material-symbols-outlined text-[13px]">gavel</span>Đã xác thực
+                          </span>
+                        )}
                       </div>
                     </div>
-                    {/* Ngày cấp & trạng thái */}
+                    {/* Lĩnh vực / Ngành nghề thực tế */}
                     <div className="bg-[#f6f3ee] p-4 rounded-xl flex flex-col gap-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-[#464555]">Ngày cấp &amp; Trạng thái</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-[#1c1c19]">15/04/2018</span>
-                        <span className="text-[#c7c4d8]">•</span>
-                        <span className="inline-flex items-center gap-1 text-[11px] text-[#57657b] font-semibold">
-                          <span className="w-2 h-2 rounded-full bg-[#4f46e5]" />Đang hoạt động
-                        </span>
-                      </div>
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-[#464555]">Lĩnh vực / Ngành nghề</span>
+                      <span className="text-sm font-semibold text-[#1c1c19]">{industry || '—'}</span>
                     </div>
                     {/* Địa chỉ (full width) */}
                     <div className="md:col-span-2 bg-[#f6f3ee] p-4 rounded-xl flex items-start justify-between gap-3">
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] font-bold uppercase tracking-wide text-[#464555]">Địa chỉ trụ sở chính (Address)</span>
-                        <span className="text-xs text-[#1c1c19]">{address}</span>
+                        <span className="text-xs text-[#1c1c19]">{address || '—'}</span>
                       </div>
-                      <button type="button" onClick={() => copyField(address, 'Đã chép địa chỉ văn phòng')}
-                        className="p-2 rounded-lg bg-white text-[#464555] hover:text-[#3525cd] hover:bg-[#f0ede9] transition-all shadow-sm shrink-0 cursor-pointer">
-                        <span className="material-symbols-outlined text-[17px]">place</span>
-                      </button>
+                      {address && (
+                        <button type="button" onClick={() => copyField(address, 'Đã chép địa chỉ văn phòng')}
+                          className="p-2 rounded-lg bg-white text-[#464555] hover:text-[#3525cd] hover:bg-[#f0ede9] transition-all shadow-sm shrink-0 cursor-pointer">
+                          <span className="material-symbols-outlined text-[17px]">place</span>
+                        </button>
+                      )}
                     </div>
-                  </div>
-                </div>
-
-                {/* Business activities table */}
-                <div className="bg-white rounded-2xl p-4 lg:p-6 shadow-sm flex flex-col gap-4">
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-[#3525cd] text-[22px]">domain</span>
-                      <h3 className="text-sm font-bold text-[#1c1c19]">Ngành Nghề Hoạt Động &amp; Lĩnh Vực Kinh Doanh</h3>
-                    </div>
-                    <p className="text-xs text-[#464555]">
-                      Dữ liệu tra cứu tự động theo Mã số thuế <strong>{tax}</strong> từ Cổng thông tin ĐKDN Quốc gia.
-                    </p>
-                  </div>
-                  <div className="overflow-x-auto w-full">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="bg-[#f0ede9] text-[#464555] text-[10px] font-bold uppercase tracking-wider">
-                          <th className="py-2 px-3 rounded-l-xl w-20">Mã ngành</th>
-                          <th className="py-2 px-3">Tên ngành nghề kinh doanh</th>
-                          <th className="py-2 px-3 rounded-r-xl w-32 text-center">Phân loại</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-transparent">
-                        {[
-                          { code: '6201', name: 'Lập trình máy vi tính', desc: 'Thiết kế, phát triển phần mềm ứng dụng, nền tảng số hóa và giải pháp AI doanh nghiệp', main: true },
-                          { code: '6202', name: 'Tư vấn máy vi tính và quản trị hệ thống', desc: 'Tư vấn kiến trúc Cloud, bảo mật và tích hợp hệ thống', main: false },
-                          { code: '6209', name: 'Hoạt động dịch vụ công nghệ thông tin và dịch vụ khác', desc: 'Dịch vụ bảo trì phần mềm và hạ tầng kỹ thuật định kỳ', main: false },
-                          { code: '6311', name: 'Xử lý dữ liệu, cho thuê lưu trữ máy chủ', desc: 'Data processing & OCR intelligence platforms', main: false },
-                          { code: '7020', name: 'Hoạt động tư vấn quản lý', desc: 'Tư vấn lộ trình chuyển đổi số doanh nghiệp vừa và lớn', main: false },
-                        ].map((row, i) => (
-                          <>
-                            <tr key={`r${i}`} className={row.main ? 'bg-[#f6f3ee]' : 'bg-[#f6f3ee]/60'}>
-                              <td className={`py-3 px-3 font-mono font-bold align-top rounded-l-xl ${row.main ? 'text-[#3525cd]' : 'text-[#464555]'}`}>{row.code}</td>
-                              <td className="py-3 px-3 align-top">
-                                <span className={`font-semibold block ${row.main ? 'text-[#1c1c19]' : 'text-[#1c1c19] font-medium'}`}>{row.name}</span>
-                                <span className="text-[#464555] text-[11px] block mt-0.5">{row.desc}</span>
-                              </td>
-                              <td className="py-3 px-3 align-top text-center rounded-r-xl">
-                                {row.main ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[#4f46e5] text-white text-[10px] font-bold shadow-sm">
-                                    <span className="material-symbols-outlined text-[13px]">star</span>Ngành chính
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-[#f0ede9] text-[#464555] text-[10px] font-semibold">Bổ trợ</span>
-                                )}
-                              </td>
-                            </tr>
-                            <tr key={`s${i}`} className="h-1.5"><td colSpan={3} /></tr>
-                          </>
-                        ))}
-                      </tbody>
-                    </table>
                   </div>
                 </div>
               </div>

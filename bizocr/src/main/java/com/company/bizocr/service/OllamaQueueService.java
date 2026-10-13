@@ -32,7 +32,7 @@ public class OllamaQueueService implements SmartLifecycle {
     private static final String PROCESSING_QUEUE = "ocr:ollama:processing";
     private static final String FAILED_QUEUE = "ocr:ollama:failed";
 
-    private final Scheduler ollamaScheduler = Schedulers.newBoundedElastic(2, 100, "ollama-worker");
+    private final Scheduler ollamaScheduler = Schedulers.newBoundedElastic(4, 200, "ollama-worker");
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private Disposable workerDisposable;
 
@@ -123,7 +123,7 @@ public class OllamaQueueService implements SmartLifecycle {
             log.warn(">> [Ollama Worker] Khôi phục task kẹt trong PROCESSING_QUEUE");
         }
 
-        this.workerDisposable = Flux.interval(Duration.ofSeconds(1))
+        this.workerDisposable = Flux.interval(Duration.ofMillis(300))
                 .takeWhile(tick -> isRunning.get())
                 .publishOn(ollamaScheduler)
                 .flatMap(tick -> {
@@ -134,13 +134,13 @@ public class OllamaQueueService implements SmartLifecycle {
                         log.error(">> [Ollama Worker] Lỗi khi thực thi processNextTask trong flatMap:", err);
                         return Mono.empty();
                     });
-                }, 2)
+                }, 4)
                 .subscribe(
                         success -> {
                         },
                         error -> log.error(">> [Ollama Worker] Worker đã chết vĩnh viễn vì lỗi:", error)
                 );
-        log.info(">> [Ollama Worker] Đã khởi động worker với Max Concurrency = 2 (Phase: {}).", getPhase());
+        log.info(">> [Ollama Worker] Đã khởi động worker với Max Concurrency = 4 (Phase: {}).", getPhase());
     }
 
     @PreDestroy
